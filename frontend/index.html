@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Agent Simulator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polygon points='12,2 22,7 22,17 12,22 2,17 2,7' stroke='%236366f1' stroke-width='1.5' fill='%230f1117'/><circle cx='12' cy='12' r='3' fill='%236366f1'/></svg>"/>
+<link rel="stylesheet" href="/static/styles.css"/>
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══ HEADER ════════════════════════════════════════════════════ -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none">
+          <polygon points="12,2 22,7 22,17 12,22 2,17 2,7" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        </svg>
+        <span>Agent Simulator</span>
+      </div>
+      <div class="conn-badge">
+        <span class="conn-dot" id="connDot"></span>
+        <span id="connLabel">Connecting…</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="hdr-btn" onclick="App.exportHistory()">
+        <svg viewBox="0 0 16 16"><path d="M8 1v8M5 6l3 3 3-3M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+        Export
+      </button>
+      <button class="hdr-btn" onclick="App.resetScene()">
+        <svg viewBox="0 0 16 16"><path d="M2 8a6 6 0 1110.5-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/><polyline points="14,1 10.5,4 14,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></svg>
+        Reset
+      </button>
+      <button class="hdr-btn primary" onclick="UI.openModal('addAgentModal')">+ Agent</button>
+    </div>
+  </header>
+
+  <!-- ═══ BODY ═══════════════════════════════════════════════════════ -->
+  <div class="body">
+
+    <!-- ─── LEFT SIDEBAR ──────────────────────────────────────────── -->
+    <aside class="sidebar sidebar-left">
+
+      <div class="panel">
+        <div class="panel-hdr">
+          <span class="panel-title">Agents</span>
+          <span class="badge" id="agentCount">0</span>
+        </div>
+        <div class="agent-list" id="agentList"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hdr">
+          <span class="panel-title">Objects</span>
+          <button class="icon-btn" onclick="UI.openModal('addObjModal')" title="Add object">
+            <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="object-list" id="objectList"></div>
+      </div>
+
+    </aside>
+
+    <!-- ─── CANVAS ────────────────────────────────────────────────── -->
+    <section class="canvas-section">
+      <div class="canvas-toolbar">
+        <div class="tool-group" id="toolGroup">
+          <button class="tool-btn active" data-tool="select" title="Select / click-to-move">
+            <svg viewBox="0 0 16 16"><path d="M3 2l10 5.5-5 1.5-2 5z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="tool-btn" data-tool="drag" title="Drag objects">
+            <svg viewBox="0 0 16 16"><path d="M8 2v3M8 11v3M2 8h3M11 8h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="playback-group">
+          <button class="tool-btn" id="recBtn" onclick="Rec.toggleRecord()" title="Record">
+            <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>
+          </button>
+          <button class="tool-btn" id="playBtn" onclick="Rec.togglePlay()" title="Replay" disabled>
+            <svg viewBox="0 0 16 16"><polygon points="4,2 13,8 4,14" fill="currentColor"/></svg>
+          </button>
+          <input class="speed-range" id="speedRange" type="range" min="0.25" max="4" step="0.25" value="1" oninput="Rec.setSpeed(this.value)"/>
+          <span class="speed-val" id="speedVal">1×</span>
+        </div>
+        <div class="canvas-coord" id="canvasCoord">x:0 y:0</div>
+      </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="scene"></canvas>
+      </div>
+    </section>
+
+    <!-- ─── RIGHT SIDEBAR ─────────────────────────────────────────── -->
+    <aside class="sidebar sidebar-right" id="rightSidebar">
+
+      <!-- Command panel (default) -->
+      <div id="cmdPanelWrap">
+        <div class="panel cmd-panel">
+          <div class="panel-hdr">
+            <span class="panel-title">Command</span>
+            <label class="smart-toggle" title="AI natural language mode">
+              <input type="checkbox" id="smartToggle"/>
+              <span class="smart-slider"></span>
+              <span class="smart-label">Smart</span>
+            </label>
+          </div>
+          <div class="cmd-input-wrap">
+            <span class="cmd-prompt">$</span>
+            <input id="cmdInput" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="agent1 move 400 300…"/>
+            <button class="cmd-run" id="cmdRunBtn" onclick="App.execCmd()">↵</button>
+          </div>
+          <div class="quick-grid">
+            <button class="q-btn" onclick="UI.fill('all move 400 300')">All→Center</button>
+            <button class="q-btn" onclick="UI.fill('all stop')">Stop All</button>
+            <button class="q-btn" onclick="UI.fill('status')">Status</button>
+            <button class="q-btn" onclick="UI.fill('history')">History</button>
+            <button class="q-btn" onclick="UI.fill('help')">Help</button>
+            <button class="q-btn" onclick="UI.fill('reset')">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent panel (shown when agent selected) -->
+      <div class="agent-panel hidden" id="agentPanel">
+        <!-- Panel header -->
+        <div class="ap-hdr">
+          <button class="ap-back" onclick="AP.close()">
+            <svg viewBox="0 0 16 16"><path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            Back
+          </button>
+          <div class="ap-identity">
+            <span class="ap-dot" id="apDot"></span>
+            <div>
+              <div class="ap-name" id="apName">Agent</div>
+              <div class="ap-id"   id="apId"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <nav class="ap-tabs">
+          <button class="ap-tab active" data-tab="chat">💬 Chat</button>
+          <button class="ap-tab" data-tab="config">⚙ Config</button>
+          <button class="ap-tab" data-tab="ai">🤖 AI</button>
+          <button class="ap-tab" data-tab="mcp">🔌 MCP</button>
+        </nav>
+
+        <!-- ── Chat pane ── -->
+        <div class="ap-pane" id="ap-chat">
+          <div class="chat-msgs" id="chatMsgs">
+            <div class="chat-welcome">
+              Select an agent and start chatting.<br/>
+              The agent uses its configured AI model.
+            </div>
+          </div>
+          <div class="chat-bar">
+            <textarea id="chatIn" rows="2" placeholder="Ask the agent…"></textarea>
+            <button class="chat-send" id="chatSendBtn" onclick="AP.sendChat()">↵</button>
+          </div>
+          <button class="chat-clear-btn" onclick="AP.clearChat()">Clear history</button>
+        </div>
+
+        <!-- ── Config pane ── -->
+        <div class="ap-pane hidden" id="ap-config">
+          <div class="pane-scroll">
+            <div class="cfg-field">
+              <label>Name</label>
+              <input id="cfgName" type="text" placeholder="Agent name"/>
+            </div>
+            <div class="cfg-field">
+              <label>Color</label>
+              <div class="color-row">
+                <input id="cfgColor" type="color" value="#6366f1"/>
+                <span id="cfgColorVal" class="color-val">#6366f1</span>
+              </div>
+            </div>
+            <div class="cfg-field">
+              <label>Speed &nbsp;<span class="cfg-val" id="cfgSpeedVal">120</span></label>
+              <input id="cfgSpeed" type="range" min="20" max="400" step="10"
+                     oninput="document.getElementById('cfgSpeedVal').textContent=this.value"/>
+            </div>
+            <div class="cfg-field-row">
+              <div class="cfg-field"><label>X</label><input id="cfgX" type="number"/></div>
+              <div class="cfg-field"><label>Y</label><input id="cfgY" type="number"/></div>
+            </div>
+            <button class="save-btn" onclick="AP.saveConfig()">Save Changes</button>
+          </div>
+        </div>
+
+        <!-- ── AI pane ── -->
+        <div class="ap-pane hidden" id="ap-ai">
+          <div class="pane-scroll">
+            <div class="cfg-field">
+              <label>Provider</label>
+              <div class="provider-btns" id="providerBtns">
+                <button class="prov-btn active" data-p="claude" onclick="AP.setProvider('claude')">Anthropic</button>
+                <button class="prov-btn" data-p="openai" onclick="AP.setProvider('openai')">OpenAI</button>
+              </div>
+            </div>
+            <div class="cfg-field">
+              <label>Model</label>
+              <select id="aiModelSel" class="full-select"></select>
+            </div>
+            <div class="cfg-field">
+              <label>System Prompt</label>
+              <textarea id="aiSysPrompt" rows="5"
+                        placeholder="Leave blank for default (uses agent name, position, state)"></textarea>
+            </div>
+            <div class="cfg-field">
+              <label>Temperature &nbsp;<span class="cfg-val" id="aiTempVal">0.7</span></label>
+              <input id="aiTemp" type="range" min="0" max="1" step="0.05"
+                     oninput="document.getElementById('aiTempVal').textContent=parseFloat(this.value).toFixed(2)"/>
+            </div>
+            <div class="cfg-field">
+              <label>API Key override <span class="label-hint">(optional)</span></label>
+              <div class="key-row">
+                <input id="aiKeyClaude" type="password" placeholder="Anthropic key (sk-ant-…)"/>
+              </div>
+              <div class="key-row" style="margin-top:4px">
+                <input id="aiKeyOpenai" type="password" placeholder="OpenAI key (sk-…)"/>
+              </div>
+              <p class="field-hint">If blank, server environment variable is used.</p>
+            </div>
+            <div class="cfg-field">
+              <label>Tools</label>
+              <div class="tools-list" id="aiToolsList"></div>
+            </div>
+            <button class="save-btn" onclick="AP.saveAI()">Save AI Config</button>
+          </div>
+        </div>
+
+        <!-- ── MCP pane ── -->
+        <div class="ap-pane hidden" id="ap-mcp">
+          <div class="pane-scroll">
+            <p class="mcp-desc">
+              Configure MCP servers for this agent. Active servers inject tool context into the system prompt.<br/>
+              <strong>Quick add</strong> presets add capability descriptions — they are not real OAuth connections. For real integrations, add a custom server URL below.
+            </p>
+            <div class="mcp-presets-wrap">
+              <div class="mcp-presets-label">Capability presets:</div>
+              <div class="mcp-presets" id="mcpPresets"></div>
+            </div>
+            <div class="mcp-list" id="mcpList"></div>
+            <button class="mcp-add-btn" onclick="AP.toggleMcpForm()">+ Custom MCP Server</button>
+            <div class="mcp-form hidden" id="mcpForm">
+              <input id="mcpFName" placeholder="Name (e.g. Web Search)"/>
+              <input id="mcpFUrl"  placeholder="Server URL / identifier"/>
+              <input id="mcpFDesc" placeholder="Description of capabilities"/>
+              <div class="mcp-form-row">
+                <button onclick="AP.hideMcpForm()">Cancel</button>
+                <button class="primary" onclick="AP.addMcp()">Add</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div><!-- /agentPanel -->
+
+      <!-- Log (always visible) -->
+      <div class="panel log-panel">
+        <div class="panel-hdr">
+          <span class="panel-title">Log</span>
+          <button class="icon-btn" onclick="UI.clearLog()" title="Clear log">
+            <svg viewBox="0 0 16 16"><path d="M3 4h10M6 4V2h4v2M5 4v8a1 1 0 001 1h4a1 1 0 001-1V4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </button>
+        </div>
+        <div class="log-list" id="logList"></div>
+      </div>
+
+    </aside><!-- /rightSidebar -->
+  </div><!-- /workspace -->
+
+  <!-- ═══ BOTTOM TASK CHAT ════════════════════════════════════════════ -->
+  <div class="bottom-panel" id="bottomPanel">
+    <div class="bp-topbar">
+      <div class="bp-title">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none"><path d="M2 3h12v8H9l-3 2v-2H2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        Task Chat
+      </div>
+      <div class="bp-agent-chips" id="bpAgentChips"></div>
+      <button class="bp-toggle" id="bpToggle" title="Collapse / expand">▼</button>
+    </div>
+    <div class="bp-body" id="bpBody">
+      <div class="bp-msgs" id="bpMsgs">
+        <div class="bp-welcome">Click agent chips above or type <code>/agent1</code> to assign. Press Enter to send.</div>
+      </div>
+      <div class="bp-input-row">
+        <div class="bp-pills" id="bpPills"></div>
+        <textarea id="bpInput" rows="2" placeholder="Type a task… /agent1 research AI trends   /agent1 /agent2 write a report"></textarea>
+        <button class="bp-send" id="bpSend">
+          <svg viewBox="0 0 16 16" width="16" height="16"><path d="M14 8L2 2l3 6-3 6z" fill="currentColor"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<!-- ═══ MODALS ══════════════════════════════════════════════════════════ -->
+
+<!-- Add Agent -->
+<div class="modal-backdrop hidden" id="addAgentModal" onclick="UI.closeModal('addAgentModal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-hdr"><h3>Add Agent</h3><button onclick="UI.closeModal('addAgentModal')">✕</button></div>
+    <div class="form-field"><label>ID</label><input id="fAgentId" placeholder="agent4"/></div>
+    <div class="form-field"><label>Name</label><input id="fAgentName" placeholder="Agent Delta"/></div>
+    <div class="form-row">
+      <div class="form-field"><label>X</label><input id="fAgentX" type="number" value="150"/></div>
+      <div class="form-field"><label>Y</label><input id="fAgentY" type="number" value="150"/></div>
+    </div>
+    <div class="form-field"><label>Color</label><input id="fAgentColor" type="color" value="#6366f1"/></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="UI.closeModal('addAgentModal')">Cancel</button>
+      <button class="btn-confirm" onclick="App.createAgent()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Object -->
+<div class="modal-backdrop hidden" id="addObjModal" onclick="UI.closeModal('addObjModal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-hdr"><h3>Add Object</h3><button onclick="UI.closeModal('addObjModal')">✕</button></div>
+    <div class="form-field">
+      <label>Type</label>
+      <select id="fObjType">
+        <option value="table">Table</option>
+        <option value="computer">Computer</option>
+        <option value="chair">Chair</option>
+        <option value="wall">Wall</option>
+        <option value="door">Door</option>
+        <option value="box">Box</option>
+      </select>
+    </div>
+    <div class="form-field"><label>ID</label><input id="fObjId" placeholder="table3"/></div>
+    <div class="form-field"><label>Label</label><input id="fObjLabel" placeholder="Table 3"/></div>
+    <div class="form-row">
+      <div class="form-field"><label>X</label><input id="fObjX" type="number" value="300"/></div>
+      <div class="form-field"><label>Y</label><input id="fObjY" type="number" value="300"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-field"><label>W</label><input id="fObjW" type="number" value="80"/></div>
+      <div class="form-field"><label>H</label><input id="fObjH" type="number" value="60"/></div>
+    </div>
+    <div class="form-field"><label>Task</label><input id="fObjTask" placeholder="Research / Writing / Code…"/></div>
+    <div class="form-field"><label>Task Description</label><input id="fObjTaskDesc" placeholder="What agents do here"/></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="UI.closeModal('addObjModal')">Cancel</button>
+      <button class="btn-confirm" onclick="App.createObject()">Place</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Object Task -->
+<div class="modal-backdrop hidden" id="editTaskModal" onclick="UI.closeModal('editTaskModal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-hdr"><h3>Edit Task</h3><button onclick="UI.closeModal('editTaskModal')">✕</button></div>
+    <input type="hidden" id="etObjId"/>
+    <div class="form-field"><label>Task</label><input id="etTask" placeholder="Research / Writing / Code…"/></div>
+    <div class="form-field"><label>Description</label><input id="etTaskDesc" placeholder="Describe what agents do here"/></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="UI.closeModal('editTaskModal')">Cancel</button>
+      <button class="btn-confirm" onclick="App.saveObjectTask()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/script.js?v=9"></script>
+</body>
+</html>
