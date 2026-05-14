@@ -36,11 +36,6 @@ DEFAULT_OBJECTS = [
         "task": "Code",
         "task_desc": "Code Development — write, review and debug code",
     },
-    {
-        "id": "wall1", "type": "wall",
-        "x": 320, "y": 80,  "w": 12,  "h": 440, "label": "Wall",
-        "task": "", "task_desc": "",
-    },
 ]
 
 # Available AI models exposed to the frontend

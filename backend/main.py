@@ -20,7 +20,7 @@ from api_integration import AIIntegration
 from command_processor import CommandProcessor
 from config import AI_MODELS, API_HOST, API_PORT, MCP_PRESETS, AGENT_TOOLS, SIM_TICK_RATE
 from environment import Environment
-from orchestrator import run_task as orchestrate_task
+from orchestrator import auto_plan_task, run_task as orchestrate_task
 
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -129,27 +129,38 @@ async def get_config():
 class TaskRequest(BaseModel):
     agents:  list
     message: str
+    auto:    bool = False
 
 @app.post("/api/task")
 async def run_task_endpoint(req: TaskRequest):
-    if not req.agents or not req.message.strip():
-        raise HTTPException(400, "agents and message required")
-    for aid in req.agents:
-        if aid not in env.agents:
-            raise HTTPException(404, f"Agent '{aid}' not found")
+    if not req.message.strip():
+        raise HTTPException(400, "message required")
+    if not req.auto:
+        if not req.agents:
+            raise HTTPException(400, "agents required (or set auto=true)")
+        for aid in req.agents:
+            if aid not in env.agents:
+                raise HTTPException(404, f"Agent '{aid}' not found")
 
-    async def _move(aid: str, x: float, y: float):
+    async def _move(aid: str, x: float, y: float, obj_id: str = None):
         if aid in env.agents:
             a = env.agents[aid]
             a.target_x = x
             a.target_y = y
             a.state    = "moving"
-            a.interaction_target = None
+            a.interaction_target = obj_id
 
     async def _bc(msg: dict):
         await broadcast_raw(json.dumps(msg))
 
     objects_snap = {oid: o.to_dict() for oid, o in env.objects.items()}
+
+    if req.auto:
+        asyncio.create_task(
+            auto_plan_task(req.message, env.agents, objects_snap, _bc, _move)
+        )
+        return {"ok": True, "agents": [], "auto": True}
+
     asyncio.create_task(
         orchestrate_task(req.agents, req.message, env.agents, objects_snap, _bc, _move)
     )

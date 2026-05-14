@@ -2,7 +2,10 @@
 LangGraph-based agent orchestrator.
 Each agent is a real ReAct agent with tool use, chain-of-thought, and streaming steps.
 """
+import asyncio
+import json
 import os
+import re
 import time
 from typing import Callable, Dict, List, Optional
 
@@ -10,23 +13,36 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from tools import BASE_TOOL_MAP, make_send_message_tool
 
-# ─── Task → location keyword map ────────────────────────────────────────────
-TASK_LOCATION: Dict[str, str] = {
-    "research":    "table1", "search":    "table1", "find":      "table1",
-    "analyze":     "table1", "analyse":   "table1", "look up":   "table1",
-    "investigate": "table1", "explore":   "table1",
-    "write":       "table2", "writing":   "table2", "document":  "table2",
-    "draft":       "table2", "report":    "table2", "summarize": "table2",
-    "summarise":   "table2", "create":    "table2", "compose":   "table2",
-    "code":        "pc1",    "program":   "pc1",    "debug":     "pc1",
-    "develop":     "pc1",    "fix":       "pc1",    "implement": "pc1",
-    "script":      "pc1",    "build":     "pc1",    "test":      "pc1",
-}
+# ─── Tool → workspace location map ──────────────────────────────────────────
+_SEARCH_TOOLS = {"web_search", "read_url", "search", "tavily", "tavilysearchresults",
+                 "browse", "fetch", "duckduckgo", "bing", "google"}
+_CODE_TOOLS   = {"readfiletool", "writefiletool", "listdirectorytool",
+                 "read_file", "write_file", "list_directory",
+                 "exec", "execute", "python", "terminal", "bash", "shell"}
+
+
+def _tool_location(tool_name: str) -> Optional[str]:
+    tl = tool_name.lower()
+    if any(kw in tl for kw in ("search", "web", "url", "fetch", "browse", "tavily", "read_url")):
+        return "table1"
+    if any(kw in tl for kw in ("file", "code", "exec", "python", "terminal", "bash", "shell", "script")):
+        return "pc1"
+    return None
 
 
 def infer_location(task: str) -> Optional[str]:
     tl = task.lower()
-    for kw, loc in TASK_LOCATION.items():
+    for kw, loc in (
+        ("research", "table1"), ("search", "table1"), ("find", "table1"),
+        ("analyze",  "table1"), ("analyse", "table1"), ("look up", "table1"),
+        ("investigate", "table1"), ("explore", "table1"),
+        ("write",    "table2"), ("writing", "table2"), ("document", "table2"),
+        ("draft",    "table2"), ("report",  "table2"), ("summarize", "table2"),
+        ("summarise","table2"), ("create",  "table2"), ("compose",   "table2"),
+        ("code",     "pc1"),    ("program", "pc1"),    ("debug",     "pc1"),
+        ("develop",  "pc1"),    ("fix",     "pc1"),    ("implement", "pc1"),
+        ("script",   "pc1"),    ("build",   "pc1"),    ("test",      "pc1"),
+    ):
         if kw in tl:
             return loc
     return None
@@ -122,6 +138,7 @@ async def run_agent_task(
     prior_context: str,
     broadcast: Callable,
     inter_agent_messages: Dict[str, List[str]],
+    move_to_location: Optional[Callable] = None,
 ) -> str:
     from langgraph.prebuilt import create_react_agent
     from langchain_core.runnables import RunnableConfig
@@ -194,6 +211,11 @@ async def run_agent_task(
                                     "ts":       time.time(),
                                 })
                             for tc in msg.tool_calls:
+                                # Move to the workspace location matching the tool
+                                if move_to_location:
+                                    loc = _tool_location(tc["name"])
+                                    if loc:
+                                        await move_to_location(loc)
                                 await broadcast({
                                     "type":     "task_tool",
                                     "agent_id": aid,
@@ -202,7 +224,9 @@ async def run_agent_task(
                                     "ts":       time.time(),
                                 })
                         elif content:
-                            # Final answer — no more tool calls
+                            # Final answer — agent writes response → Table 2
+                            if move_to_location:
+                                await move_to_location("table2")
                             final_text = content
                             await broadcast({
                                 "type":     "task_msg",
@@ -232,6 +256,30 @@ async def run_agent_task(
 
 
 # ─── Multi-agent task runner ─────────────────────────────────────────────────
+def _make_move_to_location(aid: str, env_objects_snapshot: dict,
+                            move_agent: Callable, env_agents: dict) -> Callable:
+    """Return a closure that moves the given agent to a named workspace object."""
+    last: Dict[str, str] = {}   # tracks last location to avoid redundant moves
+
+    async def move_to_location(loc_id: str) -> None:
+        if last.get("loc") == loc_id:
+            return                       # already there / already heading there
+        last["loc"] = loc_id
+        if loc_id not in env_objects_snapshot:
+            return
+        obj    = env_objects_snapshot[loc_id]
+        cx     = obj["x"] + obj["w"] / 2
+        cy     = obj["y"] + obj["h"] / 2
+        # slight upward offset so agent stands in front of the object
+        await move_agent(aid, cx, cy - 45, loc_id)
+        # update agent state immediately so canvas shows movement
+        agent = env_agents.get(aid)
+        if agent:
+            agent.state = "moving"
+
+    return move_to_location
+
+
 async def run_task(
     agent_ids: List[str],
     task: str,
@@ -242,20 +290,14 @@ async def run_task(
 ) -> None:
     inter_agent_messages: Dict[str, List[str]] = {}
 
-    # Move agents toward the relevant workspace object
-    location_id = infer_location(task)
-    if location_id and location_id in env_objects_snapshot:
-        obj = env_objects_snapshot[location_id]
-        cx  = obj["x"] + obj["w"] / 2
-        cy  = obj["y"] + obj["h"] / 2
-        n   = len(agent_ids)
-        for i, aid in enumerate(agent_ids):
-            offset = (i - (n - 1) / 2) * 35
-            await move_agent(aid, cx + offset, cy - 40)
+    # Save home positions before any movement
+    home = {aid: (env_agents[aid].x, env_agents[aid].y)
+            for aid in agent_ids if aid in env_agents}
 
     await broadcast({"type": "task_start", "agents": agent_ids,
                      "task": task, "ts": time.time()})
 
+    # Sequential pipeline: each agent gets prior context, returns home when done
     prior_context = ""
     for aid in agent_ids:
         agent = env_agents.get(aid)
@@ -263,18 +305,198 @@ async def run_task(
             continue
 
         agent_dict = agent.to_dict()
-        # Re-inject private API keys (stripped by to_dict for security)
         agent_dict["ai_config"]["api_key_claude"] = agent.ai_config.get("api_key_claude", "")
         agent_dict["ai_config"]["api_key_openai"] = agent.ai_config.get("api_key_openai", "")
         agent_dict["mcp_servers"] = agent.mcp_servers
 
+        move_to_loc = _make_move_to_location(aid, env_objects_snapshot, move_agent, env_agents)
         await broadcast({"type": "task_agent_start", "agent_id": aid, "ts": time.time()})
 
         result = await run_agent_task(
-            agent_dict, task, prior_context, broadcast, inter_agent_messages
+            agent_dict, task, prior_context, broadcast, inter_agent_messages,
+            move_to_location=move_to_loc,
         )
 
-        if result and len(agent_ids) > 1:
-            prior_context += f"\n\n[{agent_dict['name']} said]:\n{result}"
+        # Agent finished — reset state and walk home immediately
+        agent.state = "idle"
+        agent.target_x = None
+        agent.target_y = None
+        agent.interaction_target = None
+        if aid in home:
+            await move_agent(aid, home[aid][0], home[aid][1], None)
+
+        # Pass result as context to the next agent
+        if result:
+            prior_context += f"\n\n[{agent_dict['name']} completed]:\n{result}"
+
+    await broadcast({"type": "task_done", "ts": time.time()})
+
+
+# ─── Auto-planning orchestrator ───────────────────────────────────────────────
+async def auto_plan_task(
+    task: str,
+    env_agents: dict,
+    env_objects_snapshot: dict,
+    broadcast: Callable,
+    move_agent: Callable,
+) -> None:
+    """Use LLM to decide which agents should handle the task and how."""
+
+    # Find the first available API key
+    planner_provider   = "claude"
+    planner_model      = "claude-haiku-4-5-20251001"
+    planner_key_claude = ""
+    planner_key_openai = ""
+
+    for agent in env_agents.values():
+        k = agent.ai_config.get("api_key_claude", "") or os.getenv("ANTHROPIC_API_KEY", "")
+        if k:
+            planner_key_claude = k
+            planner_model = agent.ai_config.get("model", "claude-haiku-4-5-20251001")
+            break
+    if not planner_key_claude:
+        for agent in env_agents.values():
+            k = agent.ai_config.get("api_key_openai", "") or os.getenv("OPENAI_API_KEY", "")
+            if k:
+                planner_key_openai = k
+                planner_provider = "openai"
+                planner_model = "gpt-4o-mini"
+                break
+
+    if not planner_key_claude and not planner_key_openai:
+        await broadcast({"type": "task_msg", "agent_id": None, "role": "error",
+                         "content": "No API keys configured. Add a key in an agent's AI tab.",
+                         "ts": time.time()})
+        return
+
+    # Build agent capability profiles
+    profiles = []
+    for aid, agent in env_agents.items():
+        cfg     = agent.ai_config
+        mcps    = [s["name"] for s in agent.mcp_servers if s.get("active")]
+        tools   = cfg.get("enabled_tools", [])
+        sp      = (cfg.get("system_prompt") or "").strip()[:200]
+        has_key = bool(
+            cfg.get("api_key_claude") or os.getenv("ANTHROPIC_API_KEY", "")
+            or cfg.get("api_key_openai") or os.getenv("OPENAI_API_KEY", "")
+        )
+        if not has_key:
+            continue  # skip agents with no API key — they can't work
+        parts = [f"id={aid}", f"name={agent.name}"]
+        if sp:
+            parts.append(f"specialty=\"{sp}\"")
+        if mcps:
+            parts.append(f"integrations={mcps}")
+        if tools:
+            parts.append(f"tools={tools}")
+        profiles.append("- " + ", ".join(parts))
+
+    if not profiles:
+        await broadcast({"type": "task_msg", "agent_id": None, "role": "error",
+                         "content": "No AI-enabled agents found. Add an API key in an agent's AI tab.",
+                         "ts": time.time()})
+        return
+
+    plan_prompt = (
+        f"Task: {task}\n\n"
+        f"Available agents:\n" + "\n".join(profiles) + "\n\n"
+        "Your job: decide which agents are actually needed for this task "
+        "and assign each a specific subtask.\n\n"
+        "Rules:\n"
+        "- Include an agent ONLY if the task genuinely benefits from their specialty or integrations.\n"
+        "- If the task can be done by one agent, return one element.\n"
+        "- Do NOT include agents whose specialty is irrelevant to the task.\n"
+        "- Agents run sequentially — order matters. Put research/search agents first, "
+        "writing agents second, coding agents last.\n"
+        "- Each subtask must be a concrete instruction for that specific agent.\n\n"
+        "Respond ONLY with a JSON array, no markdown, no explanation:\n"
+        '[{"agent_id":"...","subtask":"..."}]'
+    )
+
+    await broadcast({"type": "task_plan", "content": "Planning task distribution…",
+                     "ts": time.time()})
+
+    plan: List[dict] = []
+    try:
+        llm    = _build_llm(planner_provider, planner_model, 0.3,
+                            planner_key_claude, planner_key_openai)
+        result = await llm.ainvoke([HumanMessage(content=plan_prompt)])
+        text   = _ai_msg_text(result)
+        match  = re.search(r"\[.*\]", text, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON array in planner response")
+        plan = json.loads(match.group())
+    except Exception as e:
+        await broadcast({"type": "task_msg", "agent_id": None, "role": "error",
+                         "content": f"Auto-plan failed ({e}). Running all AI-enabled agents.",
+                         "ts": time.time()})
+        capable = [
+            aid for aid, a in env_agents.items()
+            if a.ai_config.get("api_key_claude") or os.getenv("ANTHROPIC_API_KEY", "")
+            or a.ai_config.get("api_key_openai") or os.getenv("OPENAI_API_KEY", "")
+        ]
+        if not capable:
+            return
+        await run_task(capable, task, env_agents, env_objects_snapshot, broadcast, move_agent)
+        return
+
+    if not plan:
+        await broadcast({"type": "task_msg", "agent_id": None, "role": "error",
+                         "content": "Planner returned an empty plan.", "ts": time.time()})
+        return
+
+    # Show the plan — list which agents were selected and why
+    total    = len(env_agents)
+    selected = len(plan)
+    skipped  = [aid for aid in env_agents if aid not in {p["agent_id"] for p in plan}]
+    lines    = [f"{p['agent_id']} ({env_agents[p['agent_id']].name if p['agent_id'] in env_agents else '?'}): {p['subtask'][:80]}"
+                for p in plan]
+    skip_note = f"  (skipped: {', '.join(skipped)})" if skipped else ""
+    summary = f"{selected}/{total} agents selected{skip_note}\n" + "\n".join(lines)
+    await broadcast({"type": "task_plan", "content": summary, "ts": time.time()})
+
+    planned_ids = [p["agent_id"] for p in plan]
+    home = {aid: (env_agents[aid].x, env_agents[aid].y)
+            for aid in planned_ids if aid in env_agents}
+
+    await broadcast({"type": "task_start",
+                     "agents": planned_ids,
+                     "task": task, "ts": time.time()})
+
+    inter_agent_messages: Dict[str, List[str]] = {}
+
+    # Sequential pipeline: each agent works, then returns home and passes context to next
+    prior_context = ""
+    for assignment in plan:
+        aid     = assignment.get("agent_id", "")
+        subtask = assignment.get("subtask", task)
+        agent   = env_agents.get(aid)
+        if not agent:
+            continue
+
+        agent_dict = agent.to_dict()
+        agent_dict["ai_config"]["api_key_claude"] = agent.ai_config.get("api_key_claude", "")
+        agent_dict["ai_config"]["api_key_openai"] = agent.ai_config.get("api_key_openai", "")
+        agent_dict["mcp_servers"] = agent.mcp_servers
+
+        move_to_loc = _make_move_to_location(aid, env_objects_snapshot, move_agent, env_agents)
+        await broadcast({"type": "task_agent_start", "agent_id": aid, "ts": time.time()})
+
+        result = await run_agent_task(
+            agent_dict, subtask, prior_context, broadcast, inter_agent_messages,
+            move_to_location=move_to_loc,
+        )
+
+        # Agent finished — reset state and walk home immediately
+        agent.state = "idle"
+        agent.target_x = None
+        agent.target_y = None
+        agent.interaction_target = None
+        if aid in home:
+            await move_agent(aid, home[aid][0], home[aid][1], None)
+
+        # Pass result as context to the next agent
+        if result:
+            prior_context += f"\n\n[{agent.name} completed]:\n{result}"
 
     await broadcast({"type": "task_done", "ts": time.time()})

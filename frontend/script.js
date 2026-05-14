@@ -950,16 +950,17 @@ var BP = (() => {
     const raw = ta.value.trim(); if(!raw) return;
     const { agents: inlineAgents, message } = parseInput(raw);
     const targets = [...new Set([...selectedAgents, ...inlineAgents])];
-    const finalTargets = targets.length ? targets : scene.agents.map(a => a.id);
     if(!message) return;
-    if(!finalTargets.length) { addMsg("system","No agents available.",null,Date.now()/1000); return; }
+    if(!scene.agents.length) { addMsg("system","No agents available.",null,Date.now()/1000); return; }
+    const isAuto = targets.length === 0;
     ta.value = "";
     addMsg("user", raw, null, Date.now()/1000);
+    if (isAuto) addMsg("system", "⚡ Auto mode: agents will self-distribute based on their capabilities…", null, Date.now()/1000);
     document.getElementById("bpSend").classList.add("loading");
     try {
       const r = await fetch("/api/task", {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ agents: finalTargets, message }),
+        body: JSON.stringify({ agents: isAuto ? [] : targets, message, auto: isAuto }),
       });
       const d = await r.json();
       if (!d.ok) addMsg("system","Error: "+(d.detail||"unknown"),null,Date.now()/1000);
@@ -977,7 +978,10 @@ var BP = (() => {
   }
 
   function onWsEvent(msg) {
-    if (msg.type === "task_thought") {
+    if (msg.type === "task_plan") {
+      expand();
+      addMsg("system", "🗺 " + msg.content, null, msg.ts);
+    } else if (msg.type === "task_thought") {
       expand();
       addThought(msg.agent_id, msg.content, msg.ts);
     } else if (msg.type === "task_observation") {
@@ -1094,9 +1098,40 @@ var BP = (() => {
     input.focus();
   }
 
+  function initResize() {
+    const handle = document.getElementById("bpResizeHandle");
+    const panel  = document.getElementById("bottomPanel");
+    if (!handle || !panel) return;
+    let startY = 0, startH = 0;
+
+    handle.addEventListener("mousedown", e => {
+      if (collapsed) return;
+      e.preventDefault();
+      startY = e.clientY;
+      startH = panel.offsetHeight;
+      handle.classList.add("dragging");
+      panel.classList.add("resizing");
+
+      function onMove(ev) {
+        const delta = startY - ev.clientY;
+        const newH  = Math.max(120, Math.min(startH + delta, window.innerHeight * 0.75));
+        panel.style.height = newH + "px";
+      }
+      function onUp() {
+        handle.classList.remove("dragging");
+        panel.classList.remove("resizing");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  }
+
   function init() {
     document.getElementById("bpToggle").addEventListener("click", toggleCollapse);
     document.getElementById("bpSend").addEventListener("click", send);
+    initResize();
     const ta = document.getElementById("bpInput");
 
     ta.addEventListener("keydown", e => {
