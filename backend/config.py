@@ -8,34 +8,86 @@ MAX_AGENTS = 20
 AGENT_COLORS = [
     "#6366f1", "#22c55e", "#f59e0b", "#ef4444",
     "#8b5cf6", "#06b6d4", "#ec4899", "#14b8a6",
-    "#f97316", "#84cc16",
+    "#f97316", "#84cc16", "#a855f7",
 ]
 
+# ── Startup War Room preset ─────────────────────────────────────────────
 DEFAULT_AGENTS = [
-    {"id": "agent1", "name": "Alpha",  "x": 120, "y": 120, "color": "#6366f1"},
-    {"id": "agent2", "name": "Beta",   "x": 220, "y": 200, "color": "#22c55e"},
-    {"id": "agent3", "name": "Gamma",  "x": 160, "y": 320, "color": "#f59e0b"},
+    {
+        "id": "ceo", "name": "CEO", "x": 65, "y": 100, "color": "#6366f1",
+        "system_prompt": "You are the CEO of a fast-growing AI startup. Make strategic decisions, align the team on vision, and unblock execution. Be decisive and concise.",
+    },
+    {
+        "id": "cto", "name": "CTO", "x": 175, "y": 100, "color": "#8b5cf6",
+        "system_prompt": "You are the CTO. Own the technical architecture, oversee engineering, and make technology decisions that scale. Prioritise AI infrastructure.",
+    },
+    {
+        "id": "ai_eng", "name": "AI Engineer", "x": 285, "y": 100, "color": "#06b6d4",
+        "system_prompt": "You are the AI Lead Engineer. Design and implement ML systems, fine-tune models, and advise on AI architecture. Bridge research and production.",
+    },
+    {
+        "id": "cmo", "name": "CMO", "x": 488, "y": 100, "color": "#ec4899",
+        "system_prompt": "You are the CMO. Drive go-to-market strategy, brand positioning, and growth campaigns. Focus on pipeline and market awareness.",
+    },
+    {
+        "id": "sales", "name": "Head of Sales", "x": 603, "y": 100, "color": "#22c55e",
+        "system_prompt": "You are the Head of Sales. Close deals, manage the pipeline, and grow enterprise accounts. Be metrics-driven and customer-focused.",
+    },
+    {
+        "id": "finance", "name": "Head of Finance", "x": 600, "y": 175, "color": "#f59e0b",
+        "system_prompt": "You are the Head of Finance. Manage runway, forecasts, and budgets. Flag risks, model scenarios, and ensure healthy unit economics.",
+    },
+    {
+        "id": "legal", "name": "Legal", "x": 600, "y": 285, "color": "#ef4444",
+        "system_prompt": "You are the company's legal counsel. Review contracts, assess regulatory risk, and ensure compliance. Be thorough but pragmatic.",
+    },
+    {
+        "id": "pr", "name": "PR", "x": 600, "y": 395, "color": "#84cc16",
+        "system_prompt": "You are the PR lead. Manage media relationships, craft narratives, and handle communications. Protect and grow the brand's public image.",
+    },
+    {
+        "id": "analyst", "name": "Data Analyst", "x": 195, "y": 535, "color": "#14b8a6",
+        "system_prompt": "You are the Data Analyst. Surface insights from metrics, build dashboards, and support data-driven decisions across the company.",
+    },
+    {
+        "id": "product", "name": "Product", "x": 335, "y": 535, "color": "#f97316",
+        "system_prompt": "You are the Head of Product. Own the roadmap, write specs, and align engineering with customer needs. Balance speed with quality.",
+    },
+    {
+        "id": "strategy", "name": "Strategy", "x": 475, "y": 535, "color": "#a855f7",
+        "system_prompt": "You are the Head of Strategy. Identify growth opportunities, analyse competition, and shape long-term direction. Think 3–5 years ahead.",
+    },
 ]
 
 DEFAULT_OBJECTS = [
-    {
-        "id": "table1", "type": "table",
-        "x": 380, "y": 160, "w": 100, "h": 70, "label": "Table 1",
-        "task": "Research",
-        "task_desc": "Research & Analysis — find information, summarise sources, answer questions",
-    },
-    {
-        "id": "table2", "type": "table",
-        "x": 560, "y": 300, "w": 100, "h": 70, "label": "Table 2",
-        "task": "Writing",
-        "task_desc": "Writing & Documentation — draft texts, create reports, edit content",
-    },
-    {
-        "id": "pc1", "type": "computer",
-        "x": 390, "y": 420, "w": 80,  "h": 55,  "label": "PC 1",
-        "task": "Code",
-        "task_desc": "Code Development — write, review and debug code",
-    },
+    # ── Top workstations ──────────────────────────────────────────────
+    {"id": "desk_ceo",     "type": "computer", "x": 15,  "y": 15, "w": 100, "h": 65,
+     "label": "CEO Station",  "task": "Leadership", "task_desc": "Executive decisions and company direction"},
+    {"id": "desk_tech",    "type": "computer", "x": 125, "y": 15, "w": 100, "h": 65,
+     "label": "Tech Hub",     "task": "Code",       "task_desc": "Engineering architecture and development"},
+    {"id": "desk_ai",      "type": "computer", "x": 235, "y": 15, "w": 100, "h": 65,
+     "label": "AI Lab",       "task": "Research",   "task_desc": "AI model development and experimentation"},
+    {"id": "desk_mkt",     "type": "table",    "x": 435, "y": 15, "w": 105, "h": 65,
+     "label": "Marketing",    "task": "Marketing",  "task_desc": "Campaign planning and go-to-market strategy"},
+    {"id": "desk_sales",   "type": "table",    "x": 550, "y": 15, "w": 105, "h": 65,
+     "label": "Sales Floor",  "task": "Sales",      "task_desc": "Pipeline management and deal closing"},
+    # ── Central war room table ────────────────────────────────────────
+    {"id": "war_room",     "type": "table",    "x": 140, "y": 135, "w": 400, "h": 210,
+     "label": "War Room",     "task": "Strategy",   "task_desc": "High-level planning, OKRs and cross-team alignment"},
+    # ── Right-side desks ──────────────────────────────────────────────
+    {"id": "desk_fin",     "type": "computer", "x": 670, "y": 130, "w": 115, "h": 65,
+     "label": "Finance",      "task": "Finance",    "task_desc": "Budget, runway and financial modelling"},
+    {"id": "desk_legal",   "type": "table",    "x": 670, "y": 245, "w": 115, "h": 65,
+     "label": "Legal",        "task": "Legal",      "task_desc": "Contracts, compliance and risk assessment"},
+    {"id": "desk_pr",      "type": "table",    "x": 670, "y": 360, "w": 115, "h": 65,
+     "label": "PR & Comms",   "task": "PR",         "task_desc": "Media relations and brand communications"},
+    # ── Bottom workstations ───────────────────────────────────────────
+    {"id": "desk_data",    "type": "computer", "x": 140, "y": 445, "w": 120, "h": 65,
+     "label": "Data Station", "task": "Analysis",   "task_desc": "Metrics, dashboards and business intelligence"},
+    {"id": "desk_product", "type": "table",    "x": 280, "y": 445, "w": 120, "h": 65,
+     "label": "Product",      "task": "Product",    "task_desc": "Roadmap, specs and customer feedback"},
+    {"id": "desk_strat",   "type": "table",    "x": 420, "y": 445, "w": 120, "h": 65,
+     "label": "Strategy",     "task": "Strategy",   "task_desc": "Competitive analysis and long-term planning"},
 ]
 
 # Available AI models exposed to the frontend

@@ -39,13 +39,25 @@ async def chat(
     key_c = cfg.get("api_key_claude", "") or os.environ.get("ANTHROPIC_API_KEY", "")
     key_o = cfg.get("api_key_openai", "") or os.environ.get("OPENAI_API_KEY", "")
 
+    # Fall back to whichever provider has a key if the configured one doesn't
+    if provider == "claude" and not key_c and key_o:
+        provider = "openai"
+    elif provider == "openai" and not key_o and key_c:
+        provider = "claude"
+
+    # Ensure model is compatible with the final provider
+    if provider == "openai" and model.startswith("claude"):
+        model = "gpt-4o-mini"
+    elif provider == "claude" and (model.startswith("gpt") or model.startswith("o1") or model.startswith("o3")):
+        model = "claude-haiku-4-5-20251001"
+
     if provider == "claude":
         if not key_c:
-            return {"ok": False, "error": "ANTHROPIC_API_KEY not set for this agent"}
+            return {"ok": False, "error": "No API key configured for this agent. Use the API button in the header."}
         return await _claude(key_c, model, sys_p, msgs, temp)
     else:
         if not key_o:
-            return {"ok": False, "error": "OPENAI_API_KEY not set for this agent"}
+            return {"ok": False, "error": "No API key configured for this agent. Use the API button in the header."}
         return await _openai(key_o, model, sys_p, msgs, temp)
 
 

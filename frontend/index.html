@@ -4,7 +4,11 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Agent Simulator</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polygon points='12,2 22,7 22,17 12,22 2,17 2,7' stroke='%236366f1' stroke-width='1.5' fill='%230f1117'/><circle cx='12' cy='12' r='3' fill='%236366f1'/></svg>"/>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><polygon points='12,2 22,7 22,17 12,22 2,17 2,7' stroke='%237B6CF6' stroke-width='1.5' fill='none'/><circle cx='12' cy='12' r='3' fill='%237B6CF6'/></svg>"/>
+<meta name="color-scheme" content="dark"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css"/>
 </head>
 <body>
@@ -30,6 +34,10 @@
         <svg viewBox="0 0 16 16"><path d="M8 1v8M5 6l3 3 3-3M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
         Export
       </button>
+      <button class="hdr-btn" onclick="App.openGlobalApi()">
+        <svg viewBox="0 0 16 16"><path d="M11 1a4 4 0 010 8H9l-1 1H7v1H6v1H4v-2l4.5-4.5A4 4 0 0111 1zm1 3.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" opacity=".9"/></svg>
+        API
+      </button>
       <button class="hdr-btn" onclick="App.resetScene()">
         <svg viewBox="0 0 16 16"><path d="M2 8a6 6 0 1110.5-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/><polyline points="14,1 10.5,4 14,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" fill="none"/></svg>
         Reset
@@ -44,23 +52,21 @@
     <!-- ─── LEFT SIDEBAR ──────────────────────────────────────────── -->
     <aside class="sidebar sidebar-left">
 
-      <div class="panel">
-        <div class="panel-hdr">
-          <span class="panel-title">Agents</span>
-          <span class="badge" id="agentCount">0</span>
-        </div>
-        <div class="agent-list" id="agentList"></div>
+      <div class="sect-hdr">
+        <span>Agents</span>
+        <span class="badge" id="agentCount">0</span>
       </div>
+      <div class="agent-list" id="agentList"></div>
 
-      <div class="panel">
-        <div class="panel-hdr">
-          <span class="panel-title">Objects</span>
-          <button class="icon-btn" onclick="UI.openModal('addObjModal')" title="Add object">
-            <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          </button>
-        </div>
-        <div class="object-list" id="objectList"></div>
+      <div class="sect-divider"></div>
+
+      <div class="sect-hdr">
+        <span>Objects</span>
+        <button class="icon-btn" onclick="UI.openModal('addObjModal')" title="Add object">
+          <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
       </div>
+      <div class="object-list" id="objectList"></div>
 
     </aside>
 
@@ -98,14 +104,6 @@
       <!-- Command panel (default) -->
       <div id="cmdPanelWrap">
         <div class="panel cmd-panel">
-          <div class="panel-hdr">
-            <span class="panel-title">Command</span>
-            <label class="smart-toggle" title="AI natural language mode">
-              <input type="checkbox" id="smartToggle"/>
-              <span class="smart-slider"></span>
-              <span class="smart-label">Smart</span>
-            </label>
-          </div>
           <div class="cmd-input-wrap">
             <span class="cmd-prompt">$</span>
             <input id="cmdInput" type="text" spellcheck="false" autocomplete="off"
@@ -113,13 +111,11 @@
             <button class="cmd-run" id="cmdRunBtn" onclick="App.execCmd()">↵</button>
           </div>
           <div class="quick-grid">
-            <button class="q-btn" onclick="UI.fill('all move 400 300')">All→Center</button>
-            <button class="q-btn" onclick="UI.fill('all stop')">Stop All</button>
+            <button class="q-btn q-btn--primary" onclick="UI.fill('all stop')">Stop All</button>
             <button class="q-btn" onclick="UI.fill('status')">Status</button>
-            <button class="q-btn" onclick="UI.fill('history')">History</button>
-            <button class="q-btn" onclick="UI.fill('help')">Help</button>
-            <button class="q-btn" onclick="UI.fill('reset')">Reset</button>
+            <button class="q-btn q-btn--danger" onclick="UI.fill('reset')">Reset</button>
           </div>
+          <div class="cmd-hints">Tab autocomplete · ↑↓ history · / focus · Ctrl+L clear</div>
         </div>
       </div>
 
@@ -142,10 +138,10 @@
 
         <!-- Tabs -->
         <nav class="ap-tabs">
-          <button class="ap-tab active" data-tab="chat">💬 Chat</button>
-          <button class="ap-tab" data-tab="config">⚙ Config</button>
-          <button class="ap-tab" data-tab="ai">🤖 AI</button>
-          <button class="ap-tab" data-tab="mcp">🔌 MCP</button>
+          <button class="ap-tab active" data-tab="chat">Chat</button>
+          <button class="ap-tab" data-tab="config">Config</button>
+          <button class="ap-tab" data-tab="ai">AI</button>
+          <button class="ap-tab" data-tab="mcp">MCP</button>
         </nav>
 
         <!-- ── Chat pane ── -->
@@ -173,8 +169,8 @@
             <div class="cfg-field">
               <label>Color</label>
               <div class="color-row">
-                <input id="cfgColor" type="color" value="#6366f1"/>
-                <span id="cfgColorVal" class="color-val">#6366f1</span>
+                <input id="cfgColor" type="color" value="#5E6AD2"/>
+                <span id="cfgColorVal" class="color-val">#5E6AD2</span>
               </div>
             </div>
             <div class="cfg-field">
@@ -284,6 +280,7 @@
       <button class="bp-toggle" id="bpToggle" title="Collapse / expand">▼</button>
     </div>
     <div class="bp-body" id="bpBody">
+      <div class="bp-timeline hidden" id="bpTimeline"></div>
       <div class="bp-msgs" id="bpMsgs">
         <div class="bp-welcome">Click agent chips above or type <code>/agent1</code> to assign. Press Enter to send.</div>
       </div>
@@ -311,7 +308,7 @@
       <div class="form-field"><label>X</label><input id="fAgentX" type="number" value="150"/></div>
       <div class="form-field"><label>Y</label><input id="fAgentY" type="number" value="150"/></div>
     </div>
-    <div class="form-field"><label>Color</label><input id="fAgentColor" type="color" value="#6366f1"/></div>
+    <div class="form-field"><label>Color</label><input id="fAgentColor" type="color" value="#5E6AD2"/></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="UI.closeModal('addAgentModal')">Cancel</button>
       <button class="btn-confirm" onclick="App.createAgent()">Create</button>
@@ -367,6 +364,36 @@
   </div>
 </div>
 
-<script src="/static/script.js?v=9"></script>
+<!-- Global API Key -->
+<div class="modal-backdrop hidden" id="globalApiModal" onclick="UI.closeModal('globalApiModal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-hdr">
+      <h3>API Key — All Agents</h3>
+      <button onclick="UI.closeModal('globalApiModal')">✕</button>
+    </div>
+    <p style="font-size:13px;color:var(--text-2);margin-bottom:16px;">Apply one key to all <strong id="gApiAgentCount">0</strong> agents at once.</p>
+    <div class="form-field">
+      <label>Provider</label>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button class="prov-btn active" data-p="openai" onclick="App.setGlobalProv('openai')">OpenAI</button>
+        <button class="prov-btn" data-p="claude" onclick="App.setGlobalProv('claude')">Claude</button>
+      </div>
+    </div>
+    <div class="form-field" id="gApiKeyOpenaiField">
+      <label>OpenAI API Key</label>
+      <input id="gApiKeyOpenai" type="password" placeholder="sk-…" autocomplete="off"/>
+    </div>
+    <div class="form-field hidden" id="gApiKeyClaudeField">
+      <label>Anthropic API Key</label>
+      <input id="gApiKeyClaude" type="password" placeholder="sk-ant-…" autocomplete="off"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="UI.closeModal('globalApiModal')">Cancel</button>
+      <button class="btn-confirm" onclick="App.saveGlobalApi()">Apply to All</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/script.js?v=18"></script>
 </body>
 </html>

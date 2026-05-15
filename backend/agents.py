@@ -19,6 +19,8 @@ class Agent:
         self.state = "idle"
         self.interaction_target: Optional[str] = None
 
+        self.current_activity: str = ""
+
         self.history: List[Dict[str, Any]] = []
         self.chat_history: List[Dict[str, str]] = []   # {role, content}
         self.created_at = time.time()
@@ -92,6 +94,7 @@ class Agent:
             "speed":                self.speed,
             "state":                self.state,
             "interaction_target":   self.interaction_target,
+            "current_activity":     self.current_activity,
             "history":              self.history[-10:],
             "ai_config":            {
                 k: v for k, v in self.ai_config.items()

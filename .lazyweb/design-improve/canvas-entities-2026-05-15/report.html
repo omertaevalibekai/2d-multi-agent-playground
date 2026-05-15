@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Design Improvement: Canvas Entities</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.65;
+    background: #f8f9fa; color: #1a1a1e;
+    padding: 40px 20px;
+  }
+  .page { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 700; margin-bottom: 4px; }
+  .meta { font-size: 13px; color: #666; margin-bottom: 32px; }
+  h2 { font-size: 19px; font-weight: 700; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e5e5; }
+  h3 { font-size: 16px; font-weight: 700; margin: 28px 0 10px; color: #1a1a1e; }
+  p { margin-bottom: 12px; }
+  ul { margin: 0 0 14px 20px; }
+  li { margin-bottom: 5px; }
+  code {
+    background: #f0f0f5; border-radius: 4px;
+    padding: 1px 6px; font-size: 13px;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    color: #7b6cf6;
+  }
+  pre {
+    background: #1a1a1e; color: #f2f2f4;
+    border-radius: 8px; padding: 16px; overflow-x: auto;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    font-size: 12px; line-height: 1.6; margin: 12px 0 20px;
+  }
+  .tldr {
+    background: #eef4ff; border-left: 4px solid #7b6cf6;
+    border-radius: 0 8px 8px 0; padding: 16px 20px;
+    margin-bottom: 32px; font-size: 15px; line-height: 1.7;
+  }
+  .tldr strong { color: #7b6cf6; }
+  .variant-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 20px; margin-bottom: 32px;
+  }
+  @media (max-width: 720px) { .variant-grid { grid-template-columns: 1fr; } }
+  .variant {
+    background: #fff; border: 2px solid #e5e5e5;
+    border-radius: 14px; padding: 22px 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.06);
+    display: flex; flex-direction: column;
+  }
+  .variant.recommended { border-color: #7b6cf6; box-shadow: 0 0 0 3px rgba(123,108,246,.12), 0 4px 16px rgba(123,108,246,.12); }
+  .variant-label {
+    font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: #999; margin-bottom: 6px;
+  }
+  .variant.recommended .variant-label { color: #7b6cf6; }
+  .variant-title {
+    font-size: 18px; font-weight: 800; margin-bottom: 4px;
+  }
+  .variant-mood {
+    font-size: 12px; color: #888; margin-bottom: 16px; font-style: italic;
+  }
+  .variant-canvas {
+    background: #1a1a1e; border-radius: 10px;
+    padding: 20px 0; display: flex; justify-content: center; align-items: center;
+    margin-bottom: 16px; min-height: 180px;
+  }
+  canvas { display: block; }
+  .variant-desc { font-size: 13px; color: #444; line-height: 1.6; flex: 1; }
+  .variant-desc strong { color: #1a1a1e; }
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 2px 8px; border-radius: 99px; margin-top: 12px;
+    letter-spacing: .04em;
+  }
+  .badge-effort-low { background: #dcfce7; color: #16a34a; }
+  .badge-effort-med { background: #fef9c3; color: #ca8a04; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th { background: #f0f0f5; font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 9px 12px; text-align: left; color: #555; }
+  td { padding: 9px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { font-weight: 600; color: #1a1a1e; }
+  .working {
+    background: #f0fff4; border: 1px solid #bbf7d0;
+    border-radius: 10px; padding: 18px 22px; margin-top: 16px;
+  }
+  .working li { margin-bottom: 8px; }
+  .working strong { color: #16a34a; }
+  .divider { height: 1px; background: #e5e5e5; margin: 40px 0; }
+  .section-note { font-size: 13px; color: #666; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>Design Improvement: Canvas Entities</h1>
+  <div class="meta">Date: 2026-05-15 &nbsp;·&nbsp; Screen: Canvas — agent icons & table objects</div>
+
+  <div class="tldr">
+    <strong>TL;DR:</strong> Three ready-to-implement variants for agent icons and table objects rendered on the canvas. <strong>Variant A (Glowing Avatar)</strong> is the highest-impact change — agents get an avatar layer with a person silhouette, and objects get a colored header stripe for instant type recognition. All three slot directly into the existing <code>drawAgent()</code> / <code>drawObject()</code> functions.
+  </div>
+
+  <h2>Choose a Variant</h2>
+  <p class="section-note">Each canvas below is live — rendered with actual Canvas 2D API calls, exactly as it will appear in the app.</p>
+
+  <div class="variant-grid">
+
+    <!-- Variant A -->
+    <div class="variant recommended">
+      <div class="variant-label">⭐ Recommended</div>
+      <div class="variant-title">A — Glowing Avatar</div>
+      <div class="variant-mood">Warm · human · Notion-ish</div>
+      <div class="variant-canvas">
+        <canvas id="cvA" width="200" height="180"></canvas>
+      </div>
+      <div class="variant-desc">
+        <strong>Agent:</strong> Colored outer rim (r=17) + dark center (r=11) + person silhouette icon. Bigger initial letter replaces "AGENT1" text.<br><br>
+        <strong>Object:</strong> Tinted header strip (top 28%), type emoji left-aligned, label in lower portion, thicker border (2px), r=10.<br><br>
+        Keeps the glow shadow, just restructures depth so agents look like avatars, not circles.
+        <span class="badge badge-effort-med">Medium effort</span>
+      </div>
+    </div>
+
+    <!-- Variant B -->
+    <div class="variant">
+      <div class="variant-label">Variant B</div>
+      <div class="variant-title">B — Geometric Badge</div>
+      <div class="variant-mood">Clean · numeric · jersey</div>
+      <div class="variant-canvas">
+        <canvas id="cvB" width="200" height="180"></canvas>
+      </div>
+      <div class="variant-desc">
+        <strong>Agent:</strong> Radial gradient fill + bold 2.5px ring, always visible. Large index number (1, 2, 3…) instead of text. State arc segment on lower-right edge.<br><br>
+        <strong>Object:</strong> 3px left accent stripe, label left-aligned. Type abbreviation badge top-right. No glow — cleaner, flat.<br><br>
+        Minimal code delta. The easiest of the three to implement.
+        <span class="badge badge-effort-low">Low effort</span>
+      </div>
+    </div>
+
+    <!-- Variant C -->
+    <div class="variant">
+      <div class="variant-label">Variant C</div>
+      <div class="variant-title">C — Dot Grid</div>
+      <div class="variant-mood">Geometric · techy · blueprint</div>
+      <div class="variant-canvas">
+        <canvas id="cvC" width="200" height="180"></canvas>
+      </div>
+      <div class="variant-desc">
+        <strong>Agent:</strong> Octagon shape (8-sided polygon). Dark fill, colored outline. 3×3 dot grid inside — center dot state-colored.<br><br>
+        <strong>Object:</strong> Corner fold (top-right squared), dotted top border divider, task text below the divider line. No separate chip.<br><br>
+        Most visually distinct from current. Great for a "simulation / blueprint" aesthetic.
+        <span class="badge badge-effort-med">Medium effort</span>
+      </div>
+    </div>
+
+  </div>
+
+  <h2>Comparison</h2>
+  <table>
+    <tr>
+      <th></th>
+      <th>A — Glowing Avatar</th>
+      <th>B — Geometric Badge</th>
+      <th>C — Dot Grid</th>
+    </tr>
+    <tr><td>Agent shape</td><td>Circle rim + dark center (r=17)</td><td>Circle + bold ring (r=15)</td><td>Octagon (r=15)</td></tr>
+    <tr><td>Agent label</td><td>Person silhouette + big initial</td><td>Large index number</td><td>3×3 dot grid</td></tr>
+    <tr><td>Object change</td><td>Header strip + emoji icon</td><td>Left accent stripe + type badge</td><td>Corner fold + dotted divider</td></tr>
+    <tr><td>Glow / shadow</td><td>Yes (softer, more refined)</td><td>No</td><td>No</td></tr>
+    <tr><td>Effort</td><td>Medium (~40 lines)</td><td>Low (~20 lines)</td><td>Medium (~50 lines)</td></tr>
+    <tr><td>Mood</td><td>Warm, modern SaaS</td><td>Clean, numerical</td><td>Technical, diagrammatic</td></tr>
+  </table>
+
+  <div class="divider"></div>
+
+  <h2>What's Working (Keep These)</h2>
+  <div class="working">
+    <ul>
+      <li><strong>Per-agent colors</strong> — <code>a.color</code> per agent is the strongest orientation cue on the canvas. Every variant preserves it.</li>
+      <li><strong>Speech bubble above agent</strong> — Dark <code>#2C2C32</code> bubble with colored border tail is excellent for readability. Unchanged in all three.</li>
+      <li><strong>Animated moving ring</strong> — The sin-pulse ring on <code>moving</code> state reads instantly without any label. Keep it in A and B.</li>
+      <li><strong>OBJ_STYLE type colors</strong> — Purple/table, cyan/computer, amber/chair color language already works. All variants build on it.</li>
+      <li><strong>Agents-here badge</strong> — The top-right circle with count is simple and functional. A upgrades it to a pill; B and C keep it as-is.</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+// ─── Shared helpers ──────────────────────────────────────────────────
+function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r); ctx.closePath();
+}
+function rrectTopRounded(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w, y+h); ctx.lineTo(x, y+h); ctx.lineTo(x, y+r);
+  ctx.arcTo(x,y,x+r,y,r); ctx.closePath();
+}
+function octagon(ctx, cx, cy, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI/8) + (Math.PI/4)*i;
+    i === 0 ? ctx.moveTo(cx + r*Math.cos(a), cy + r*Math.sin(a))
+            : ctx.lineTo(cx + r*Math.cos(a), cy + r*Math.sin(a));
+  }
+  ctx.closePath();
+}
+
+const AGENTS = [
+  { name: "Alpha", color: "#7B6CF6", state: "moving",     idx: 1, activity: "researching" },
+  { name: "Beta",  color: "#22D3EE", state: "idle",        idx: 2, activity: null },
+  { name: "Gamma", color: "#F59E0B", state: "interacting", idx: 3, activity: null },
+];
+const OBJ = { label: "TABLE 1", type: "table", task: "research", color: "#7B6CF6", fill: "#1E1E28" };
+const OBJ2 = { label: "PC 1", type: "computer", task: null, color: "#22D3EE", fill: "#18232A" };
+
+// ─── Variant A ───────────────────────────────────────────────────────
+(function drawA() {
+  const cv = document.getElementById("cvA");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const positions = [ {x:42, y:70}, {x:100, y:70}, {x:158, y:70} ];
+
+  AGENTS.forEach((a, i) => {
+    const {x, y} = positions[i];
+    const r = 17;
+
+    // Moving ring
+    if (a.state === "moving") {
+      ctx.strokeStyle = a.color; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.45;
+      ctx.beginPath(); ctx.arc(x, y, r+6, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, r+10, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Outer rim glow
+    ctx.shadowColor = a.color + "55"; ctx.shadowBlur = 18;
+    ctx.fillStyle = a.color;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Dark center
+    ctx.fillStyle = "#1C1C22";
+    ctx.beginPath(); ctx.arc(x, y, r - 5, 0, Math.PI*2); ctx.fill();
+
+    // Person silhouette
+    ctx.fillStyle = a.color + "CC";
+    ctx.beginPath(); ctx.arc(x, y-3, 3.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y+7, 5.5, Math.PI, 0); ctx.fill();
+
+    // State dot
+    const sc = a.state === "idle" ? "#6B7280" : a.state === "moving" ? "#22C55E" : "#F59E0B";
+    ctx.fillStyle = sc;
+    ctx.beginPath(); ctx.arc(x + r*0.65, y - r*0.65, 5, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#1a1a1e"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x + r*0.65, y - r*0.65, 5, 0, Math.PI*2); ctx.stroke();
+
+    // Speech bubble
+    if (a.activity) {
+      ctx.font = "500 8px Inter, sans-serif";
+      const tw = ctx.measureText(a.activity).width;
+      const bw = tw + 14, bh = 16, bx = x - bw/2, by = y - r - 10 - bh;
+      ctx.shadowColor = a.color + "40"; ctx.shadowBlur = 8;
+      ctx.fillStyle = "#2C2C32"; rrect(ctx, bx, by, bw, bh, 4); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = a.color + "80"; ctx.lineWidth = 1.2;
+      rrect(ctx, bx, by, bw, bh, 4); ctx.stroke();
+      ctx.fillStyle = "#F2F2F4"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(a.activity, x, by + bh/2);
+    }
+
+    // Name
+    ctx.fillStyle = "rgba(242,242,244,0.85)"; ctx.font = "11px Inter, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(a.name, x, y + r + 5);
+  });
+
+  // Objects
+  const objX = 22, objY = 128, objW = 68, objH = 36;
+  const headerH = Math.floor(objH * 0.32);
+  // Table
+  ctx.shadowColor = "#7B6CF655"; ctx.shadowBlur = 10;
+  ctx.fillStyle = "#1E1E28"; rrect(ctx, objX, objY, objW, objH, 10); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#7B6CF6"; ctx.lineWidth = 2;
+  rrect(ctx, objX, objY, objW, objH, 10); ctx.stroke();
+  // Header strip
+  ctx.fillStyle = "#7B6CF620";
+  rrectTopRounded(ctx, objX, objY, objW, headerH, 10); ctx.fill();
+  ctx.strokeStyle = "#7B6CF630"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(objX, objY+headerH); ctx.lineTo(objX+objW, objY+headerH); ctx.stroke();
+  // Label
+  ctx.fillStyle = "#9E95FC"; ctx.font = "600 9px Inter, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("TABLE 1", objX + objW/2, objY + headerH + (objH-headerH)*0.35);
+  ctx.fillStyle = "#7B6CF6CC"; ctx.font = "500 7.5px Inter, sans-serif";
+  ctx.fillText("research", objX + objW/2, objY + headerH + (objH-headerH)*0.72);
+
+  // PC
+  const pcX = 110, pcY = 128, pcW = 68, pcH = 36;
+  ctx.shadowColor = "#22D3EE55"; ctx.shadowBlur = 10;
+  ctx.fillStyle = "#18232A"; rrect(ctx, pcX, pcY, pcW, pcH, 10); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#22D3EE"; ctx.lineWidth = 2;
+  rrect(ctx, pcX, pcY, pcW, pcH, 10); ctx.stroke();
+  const pcHeaderH = Math.floor(pcH * 0.32);
+  ctx.fillStyle = "#22D3EE20";
+  rrectTopRounded(ctx, pcX, pcY, pcW, pcHeaderH, 10); ctx.fill();
+  ctx.strokeStyle = "#22D3EE30"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pcX, pcY+pcHeaderH); ctx.lineTo(pcX+pcW, pcY+pcHeaderH); ctx.stroke();
+  ctx.fillStyle = "#38BDF8"; ctx.font = "600 9px Inter, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("PC 1", pcX + pcW/2, pcY + pcHeaderH + (pcH-pcHeaderH)*0.5);
+})();
+
+// ─── Variant B ───────────────────────────────────────────────────────
+(function drawB() {
+  const cv = document.getElementById("cvB");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const positions = [ {x:42, y:70}, {x:100, y:70}, {x:158, y:70} ];
+
+  AGENTS.forEach((a, i) => {
+    const {x, y} = positions[i];
+    const r = 15;
+
+    // Gradient fill
+    const grad = ctx.createRadialGradient(x-3, y-3, 1, x, y, r);
+    const base = a.color;
+    grad.addColorStop(0, base + "FF");
+    grad.addColorStop(1, base + "99");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+
+    // Bold ring
+    ctx.strokeStyle = a.color; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
+
+    // Index number
+    ctx.fillStyle = "#fff"; ctx.font = "bold 15px Inter, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(i + 1, x, y + 1);
+
+    // State arc (lower right quadrant)
+    const sc = a.state === "idle" ? "#6B728066" : a.state === "moving" ? "#22C55E" : "#F59E0B";
+    ctx.strokeStyle = sc; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, r + 3, 0.3 * Math.PI, 0.9 * Math.PI); ctx.stroke();
+
+    // Name
+    ctx.fillStyle = "rgba(242,242,244,0.85)"; ctx.font = "11px Inter, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(a.name, x, y + r + 5);
+  });
+
+  // Objects — left accent stripe style
+  const drawObjB = (ox, oy, ow, oh, stroke, fill, labelClr, label, task, abbr) => {
+    ctx.fillStyle = fill; rrect(ctx, ox, oy, ow, oh, 7); ctx.fill();
+    ctx.strokeStyle = stroke + "60"; ctx.lineWidth = 1;
+    rrect(ctx, ox, oy, ow, oh, 7); ctx.stroke();
+    // Left accent stripe
+    ctx.fillStyle = stroke;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy+7); ctx.lineTo(ox, oy+oh-7);
+    ctx.arcTo(ox, oy+oh, ox+7, oy+oh, 7); ctx.lineTo(ox+7, oy+oh);
+    ctx.lineTo(ox+3, oy+oh); ctx.lineTo(ox+3, oy+oh-7);
+    ctx.lineTo(ox+3, oy+7);
+    ctx.arcTo(ox+3, oy, ox+7, oy, 7);
+    // Actually just a simple rect stripe
+    ctx.restore();
+    ctx.save();
+    ctx.fillStyle = stroke;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(ox, oy+7, 3, oh-14, [0,2,2,0]) : ctx.fillRect(ox, oy+7, 3, oh-14);
+    ctx.fill();
+    // Label left-aligned
+    ctx.fillStyle = labelClr; ctx.font = "600 9px Inter, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    const cy2 = task ? oy + oh/2 - 6 : oy + oh/2;
+    ctx.fillText(label, ox + 10, cy2);
+    if (task) {
+      ctx.fillStyle = stroke + "CC"; ctx.font = "500 7.5px Inter, sans-serif";
+      ctx.fillText(task, ox + 10, oy + oh/2 + 6);
+    }
+    // Abbr badge
+    ctx.fillStyle = "#2a2a2e"; ctx.font = "bold 7px Inter, sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "top";
+    ctx.fillText(abbr, ox + ow - 5, oy + 5);
+  };
+
+  ctx.save();
+  drawObjB(22, 128, 68, 36, "#7B6CF6", "#1E1E28", "#9E95FC", "TABLE 1", "research", "TBL");
+  drawObjB(110, 128, 68, 36, "#22D3EE", "#18232A", "#38BDF8", "PC 1", null, "PC");
+  ctx.restore();
+})();
+
+// ─── Variant C ───────────────────────────────────────────────────────
+(function drawC() {
+  const cv = document.getElementById("cvC");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const positions = [ {x:42, y:72}, {x:100, y:72}, {x:158, y:72} ];
+
+  AGENTS.forEach((a, i) => {
+    const {x, y} = positions[i];
+    const r = 15;
+
+    // Octagon
+    ctx.fillStyle = "#222228"; octagon(ctx, x, y, r); ctx.fill();
+    ctx.strokeStyle = a.color; ctx.lineWidth = 2; octagon(ctx, x, y, r); ctx.stroke();
+
+    // 3×3 dot grid
+    const sc = a.state === "idle" ? "#6B7280" : a.state === "moving" ? "#22C55E" : "#F59E0B";
+    const sp = 5;
+    for (let row = -1; row <= 1; row++) {
+      for (let col = -1; col <= 1; col++) {
+        const isCtr = row === 0 && col === 0;
+        ctx.fillStyle = isCtr ? sc : a.color + "44";
+        ctx.beginPath(); ctx.arc(x + col*sp, y + row*sp, isCtr ? 2.5 : 1.5, 0, Math.PI*2); ctx.fill();
+      }
+    }
+
+    // Name
+    ctx.fillStyle = "rgba(242,242,244,0.85)"; ctx.font = "11px Inter, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(a.name, x, y + r + 5);
+  });
+
+  // Objects — corner fold style
+  const drawObjC = (ox, oy, ow, oh, stroke, fill, labelClr, label, task) => {
+    // Main rect (top-right corner squared)
+    const cr = 8;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(ox+cr, oy); ctx.lineTo(ox+ow, oy);          // top — full width (no round at tr)
+    ctx.lineTo(ox+ow, oy+oh-cr); ctx.arcTo(ox+ow, oy+oh, ox+ow-cr, oy+oh, cr);
+    ctx.lineTo(ox+cr, oy+oh); ctx.arcTo(ox, oy+oh, ox, oy+oh-cr, cr);
+    ctx.lineTo(ox, oy+cr); ctx.arcTo(ox, oy, ox+cr, oy, cr);
+    ctx.closePath(); ctx.fill();
+    // Stroke
+    ctx.strokeStyle = stroke; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(ox+cr, oy); ctx.lineTo(ox+ow, oy);
+    ctx.lineTo(ox+ow, oy+oh-cr); ctx.arcTo(ox+ow, oy+oh, ox+ow-cr, oy+oh, cr);
+    ctx.lineTo(ox+cr, oy+oh); ctx.arcTo(ox, oy+oh, ox, oy+oh-cr, cr);
+    ctx.lineTo(ox, oy+cr); ctx.arcTo(ox, oy, ox+cr, oy, cr);
+    ctx.closePath(); ctx.stroke();
+    // Dotted divider
+    if (task) {
+      const divY = oy + Math.floor(oh * 0.5);
+      ctx.setLineDash([2, 3]); ctx.strokeStyle = stroke + "55"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(ox+6, divY); ctx.lineTo(ox+ow-6, divY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = labelClr; ctx.font = "600 9px Inter, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(label, ox + ow/2, oy + oh*0.28);
+      ctx.fillStyle = stroke + "CC"; ctx.font = "500 7.5px Inter, sans-serif";
+      ctx.fillText(task, ox + ow/2, oy + oh*0.73);
+    } else {
+      ctx.fillStyle = labelClr; ctx.font = "600 9px Inter, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(label, ox + ow/2, oy + oh/2);
+    }
+  };
+
+  drawObjC(22, 128, 68, 38, "#7B6CF6", "#1E1E28", "#9E95FC", "TABLE 1", "research");
+  drawObjC(110, 128, 68, 38, "#22D3EE", "#18232A", "#38BDF8", "PC 1", null);
+})();
+</script>
+</body>
+</html>

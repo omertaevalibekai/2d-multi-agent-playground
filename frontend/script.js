@@ -11,22 +11,33 @@
 const SCENE_W = 800, SCENE_H = 600, LERP = 0.28;
 
 const OBJ_STYLE = {
-  table:    { fill:"#fdf4e7", stroke:"#c8975a", label:"#8a6030" },
-  computer: { fill:"#eff4ff", stroke:"#5b8def", label:"#2563eb" },
-  chair:    { fill:"#fef2f2", stroke:"#e88080", label:"#b45252" },
-  wall:     { fill:"#f0f2f8", stroke:"#8490be", label:"#4a5677" },
-  door:     { fill:"#f0fdf4", stroke:"#34a868", label:"#168040" },
-  box:      { fill:"#fffbeb", stroke:"#c09a3e", label:"#8a6e1a" },
+  table:    { fill:"#1E1E28", stroke:"#7B6CF6", label:"#9E95FC" },
+  computer: { fill:"#18232A", stroke:"#22D3EE", label:"#38BDF8" },
+  chair:    { fill:"#261E18", stroke:"#F59E0B", label:"#FCD34D" },
+  wall:     { fill:"#1C1C20", stroke:"#484850", label:"#8B8B96" },
+  door:     { fill:"#18241E", stroke:"#22C55E", label:"#4ADE80" },
+  box:      { fill:"#221E14", stroke:"#EAB308", label:"#FDE047" },
 };
 const OBJ_ICONS  = { table:"🪑", computer:"🖥", chair:"💺", wall:"🧱", door:"🚪", box:"📦" };
-const STATE_CLRS = { idle:"#475569", moving:"#3b82f6", interacting:"#f59e0b" };
-const TASK_CLRS  = { Research:"#3b82f6", Writing:"#22c55e", Code:"#8b5cf6",
-                     Analysis:"#06b6d4", Design:"#ec4899", Other:"#64748b" };
+const STATE_CLRS = {
+  idle:        "#57575F",
+  moving:      "#7B6CF6",
+  interacting: "#F59E0B",
+};
+const TASK_CLRS  = {
+  Research: "#7B6CF6",
+  Writing:  "#22C55E",
+  Code:     "#22D3EE",
+  Analysis: "#A78BFA",
+  Design:   "#F472B6",
+  Other:    "#8B8B96",
+};
 const MODELS = { claude:[], openai:[] };
 
 // ─── State ─────────────────────────────────────────────────────────
 let scene     = { agents:[], objects:[], cmd_log:[], width:SCENE_W, height:SCENE_H };
 let localPos  = {};      // id → {x,y}
+let handoffs  = [];      // active handoff arrows [{fromId,toId,start,dur,color}]
 let selectedId = null;
 let activeTool = "select";
 let dragState  = null;
@@ -104,52 +115,196 @@ function renderLoop() {
   drawBg(); drawGrid();
   for (const o of scene.objects) drawObject(o);
   for (const a of scene.agents)  drawMovePath(a);
+  drawHandoffs();
   for (const a of scene.agents)  drawAgent(a);
   drawCursor();
   requestAnimationFrame(renderLoop);
 }
 
 function drawBg() {
-  ctx.fillStyle = "#eef1f9";
-  ctx.fillRect(0,0,SCENE_W,SCENE_H);
+  // Floor base
+  ctx.fillStyle = "#19171B";
+  ctx.fillRect(0, 0, SCENE_W, SCENE_H);
+  // Floor tiles (50×50)
+  ctx.save();
+  const TILE = 50;
+  // Alternating tile fill
+  ctx.fillStyle = "rgba(255,255,255,0.009)";
+  for (let row = 0; row * TILE < SCENE_H; row++) {
+    for (let col = row % 2; col * TILE < SCENE_W; col += 2) {
+      ctx.fillRect(col * TILE, row * TILE, TILE, TILE);
+    }
+  }
+  // Tile grid lines
+  ctx.strokeStyle = "rgba(255,255,255,0.032)"; ctx.lineWidth = 1;
+  for (let x = 0; x <= SCENE_W; x += TILE) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, SCENE_H); ctx.stroke();
+  }
+  for (let y = 0; y <= SCENE_H; y += TILE) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(SCENE_W, y); ctx.stroke();
+  }
+  ctx.restore();
+  // Perimeter walls
+  const W = 7;
+  ctx.fillStyle = "#252030";
+  ctx.fillRect(0, 0, SCENE_W, W);
+  ctx.fillRect(0, SCENE_H - W, SCENE_W, W);
+  ctx.fillRect(0, 0, W, SCENE_H);
+  ctx.fillRect(SCENE_W - W, 0, W, SCENE_H);
+  // Wall inner accent line
+  ctx.strokeStyle = "rgba(123,108,246,0.22)"; ctx.lineWidth = 1;
+  ctx.strokeRect(W + 0.5, W + 0.5, SCENE_W - W*2 - 1, SCENE_H - W*2 - 1);
 }
 
 function drawGrid() {
   ctx.save();
-  ctx.strokeStyle="rgba(0,0,0,.04)"; ctx.lineWidth=.5;
-  for(let x=0;x<=SCENE_W;x+=25){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,SCENE_H);ctx.stroke();}
-  for(let y=0;y<=SCENE_H;y+=25){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(SCENE_W,y);ctx.stroke();}
-  ctx.strokeStyle="rgba(0,0,0,.09)"; ctx.lineWidth=1;
-  for(let x=0;x<=SCENE_W;x+=100){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,SCENE_H);ctx.stroke();}
-  for(let y=0;y<=SCENE_H;y+=100){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(SCENE_W,y);ctx.stroke();}
-  ctx.fillStyle="rgba(74,86,119,.35)"; ctx.font="9px monospace"; ctx.textAlign="left";
-  for(let x=100;x<SCENE_W;x+=100) ctx.fillText(x,x+2,10);
-  for(let y=100;y<SCENE_H;y+=100) ctx.fillText(y,2,y-2);
+  ctx.fillStyle = "rgba(255,255,255,0.1)"; ctx.font = "9px monospace"; ctx.textAlign = "left";
+  for (let x = 100; x < SCENE_W; x += 100) ctx.fillText(x, x+2, 20);
+  for (let y = 100; y < SCENE_H; y += 100) ctx.fillText(y, 10, y - 2);
   ctx.restore();
 }
 
 function drawObject(o) {
-  const s = OBJ_STYLE[o.type]||OBJ_STYLE.box;
+  const s = OBJ_STYLE[o.type] || OBJ_STYLE.box;
   ctx.save();
-  ctx.shadowColor="rgba(0,0,0,.18)"; ctx.shadowBlur=10; ctx.shadowOffsetY=3;
-  ctx.fillStyle=s.fill; ctx.strokeStyle=s.stroke; ctx.lineWidth=1.5;
-  if(o.type==="wall"){ctx.fillRect(o.x,o.y,o.w,o.h);ctx.strokeRect(o.x,o.y,o.w,o.h);}
-  else{rrect(o.x,o.y,o.w,o.h,7);ctx.fill();ctx.stroke();}
-  ctx.shadowBlur=0; ctx.shadowOffsetY=0;
-  // Label
-  ctx.fillStyle=s.label; ctx.font="bold 10px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
-  const cy = o.task ? o.y+o.h/2-6 : o.y+o.h/2;
-  ctx.fillText(o.label||o.id, o.x+o.w/2, cy);
-  // Task chip
-  if(o.task){
-    const tc = TASK_CLRS[o.task]||TASK_CLRS.Other;
-    ctx.fillStyle=tc+"cc"; ctx.font="bold 8px sans-serif";
-    ctx.fillText(o.task, o.x+o.w/2, o.y+o.h/2+8);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+
+  if (o.type === "table") {
+    const legS = Math.max(5, Math.min(8, o.w * 0.09));
+    // Corner legs
+    ctx.fillStyle = "#3A2510";
+    const corners = [[o.x, o.y], [o.x+o.w-legS, o.y], [o.x, o.y+o.h-legS], [o.x+o.w-legS, o.y+o.h-legS]];
+    for (const [lx, ly] of corners) { ctx.fillRect(lx, ly, legS, legS); }
+    // Tabletop surface
+    ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 7; ctx.shadowOffsetY = 2;
+    ctx.fillStyle = "#5C3B18";
+    rrect(o.x + legS*0.5, o.y + legS*0.5, o.w - legS, o.h - legS, 5); ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    // Wood grain
+    ctx.save();
+    rrect(o.x + legS*0.5, o.y + legS*0.5, o.w - legS, o.h - legS, 5); ctx.clip();
+    ctx.strokeStyle = "rgba(255,210,100,0.07)"; ctx.lineWidth = 1;
+    for (let i = 1; i <= 3; i++) {
+      const lx = o.x + legS*0.5 + (o.w - legS) * i / 4;
+      ctx.beginPath(); ctx.moveTo(lx, o.y + legS*0.5 + 2); ctx.lineTo(lx, o.y + o.h - legS*0.5 - 2); ctx.stroke();
+    }
+    ctx.restore();
+    // Tabletop edge
+    ctx.strokeStyle = "#8A5D22"; ctx.lineWidth = 1.5;
+    rrect(o.x + legS*0.5, o.y + legS*0.5, o.w - legS, o.h - legS, 5); ctx.stroke();
+    // Accent glow ring
+    ctx.shadowColor = s.stroke + "35"; ctx.shadowBlur = 7;
+    ctx.strokeStyle = s.stroke + "45"; ctx.lineWidth = 1.2;
+    rrect(o.x, o.y, o.w, o.h, 8); ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Label as room nameplate at the top
+    const topSurf = o.y + legS * 0.5;
+    ctx.fillStyle = "#FFD980"; ctx.font = "700 10px 'Inter', sans-serif";
+    ctx.shadowColor = "rgba(0,0,0,0.8)"; ctx.shadowBlur = 3;
+    ctx.fillText(o.label || o.id, o.x + o.w/2, topSurf + 11);
+    ctx.shadowBlur = 0;
+    if (o.task) {
+      const tc = TASK_CLRS[o.task] || TASK_CLRS.Other;
+      ctx.fillStyle = "#fff9cccc"; ctx.font = "500 8px 'Inter', sans-serif";
+      ctx.fillText(o.task, o.x + o.w/2, topSurf + 23);
+    }
+
+  } else if (o.type === "computer") {
+    // Outer casing
+    ctx.shadowColor = s.stroke + "44"; ctx.shadowBlur = 12;
+    ctx.fillStyle = "#161E26";
+    rrect(o.x + 3, o.y + 3, o.w - 6, o.h - 6, 6); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = s.stroke; ctx.lineWidth = 1.5;
+    rrect(o.x + 3, o.y + 3, o.w - 6, o.h - 6, 6); ctx.stroke();
+    // Screen inner
+    const sx = o.x + 8, sy = o.y + 8, sw = o.w - 16, sh = o.h - 18;
+    ctx.fillStyle = "#081420";
+    rrect(sx, sy, sw, sh, 3); ctx.fill();
+    // Screen glow gradient
+    const screenGrad = ctx.createLinearGradient(sx, sy, sx, sy + sh);
+    screenGrad.addColorStop(0, s.stroke + "18");
+    screenGrad.addColorStop(1, s.stroke + "06");
+    ctx.fillStyle = screenGrad;
+    rrect(sx, sy, sw, sh, 3); ctx.fill();
+    ctx.strokeStyle = s.stroke + "70"; ctx.lineWidth = 1;
+    rrect(sx, sy, sw, sh, 3); ctx.stroke();
+    // Stand bar at bottom
+    ctx.fillStyle = "#1F2D38";
+    ctx.fillRect(o.x + o.w/2 - 6, o.y + o.h - 5, 12, 3);
+    // Label on screen
+    ctx.fillStyle = s.label; ctx.font = "600 10px 'Inter', sans-serif";
+    const cy2 = o.task ? sy + sh/2 - 6 : sy + sh/2;
+    ctx.fillText(o.label || o.id, o.x + o.w/2, cy2);
+    if (o.task) {
+      const tc = TASK_CLRS[o.task] || TASK_CLRS.Other;
+      ctx.fillStyle = tc + "cc"; ctx.font = "500 8px 'Inter', sans-serif";
+      ctx.fillText(o.task, o.x + o.w/2, sy + sh/2 + 6);
+    }
+
+  } else if (o.type === "chair") {
+    // Back rest (top)
+    ctx.shadowColor = s.stroke + "44"; ctx.shadowBlur = 8;
+    ctx.fillStyle = "#1E1810";
+    rrect(o.x + o.w*0.18, o.y + 3, o.w*0.64, o.h * 0.3, 4); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = s.stroke; ctx.lineWidth = 1.5;
+    rrect(o.x + o.w*0.18, o.y + 3, o.w*0.64, o.h * 0.3, 4); ctx.stroke();
+    // Seat oval
+    ctx.fillStyle = "#261E12";
+    ctx.beginPath(); ctx.ellipse(o.x + o.w/2, o.y + o.h*0.63, o.w*0.38, o.h*0.3, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = s.stroke; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(o.x + o.w/2, o.y + o.h*0.63, o.w*0.38, o.h*0.3, 0, 0, Math.PI*2); ctx.stroke();
+    // Cushion highlight
+    ctx.fillStyle = s.stroke + "1A";
+    ctx.beginPath(); ctx.ellipse(o.x + o.w/2, o.y + o.h*0.61, o.w*0.28, o.h*0.22, 0, 0, Math.PI*2); ctx.fill();
+    // Label on seat
+    ctx.fillStyle = s.label; ctx.font = "600 10px 'Inter', sans-serif";
+    ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 3;
+    const cy3 = o.task ? o.y + o.h*0.63 - 6 : o.y + o.h*0.63;
+    ctx.fillText(o.label || o.id, o.x + o.w/2, cy3);
+    ctx.shadowBlur = 0;
+    if (o.task) {
+      const tc = TASK_CLRS[o.task] || TASK_CLRS.Other;
+      ctx.fillStyle = tc + "cc"; ctx.font = "500 8px 'Inter', sans-serif";
+      ctx.fillText(o.task, o.x + o.w/2, o.y + o.h*0.63 + 6);
+    }
+
+  } else {
+    // wall, door, box — original rendering
+    ctx.shadowColor = s.stroke + "55"; ctx.shadowBlur = 14;
+    ctx.fillStyle = s.fill;
+    if (o.type === "wall") {
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+    } else {
+      rrect(o.x, o.y, o.w, o.h, 8); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = s.stroke; ctx.lineWidth = 1.5;
+    if (o.type === "wall") {
+      ctx.strokeRect(o.x, o.y, o.w, o.h);
+    } else {
+      rrect(o.x, o.y, o.w, o.h, 8); ctx.stroke();
+    }
+    ctx.fillStyle = s.label; ctx.font = "600 10px 'Inter', sans-serif";
+    const cy4 = o.task ? o.y + o.h/2 - 7 : o.y + o.h/2;
+    ctx.fillText(o.label || o.id, o.x + o.w/2, cy4);
+    if (o.task) {
+      const tc = TASK_CLRS[o.task] || TASK_CLRS.Other;
+      ctx.fillStyle = tc + "cc"; ctx.font = "500 8px 'Inter', sans-serif";
+      ctx.fillText(o.task, o.x + o.w/2, o.y + o.h/2 + 7);
+    }
   }
-  // Interaction badge
-  if(o.agents_here&&o.agents_here.length){
-    ctx.fillStyle="#f59e0b"; ctx.beginPath(); ctx.arc(o.x+o.w-8,o.y+8,7,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle="#fff"; ctx.font="bold 8px sans-serif"; ctx.fillText(o.agents_here.length,o.x+o.w-8,o.y+11);
+
+  // Agents-here badge (all types)
+  if (o.agents_here && o.agents_here.length) {
+    ctx.fillStyle = "#7B6CF6";
+    ctx.shadowColor = "rgba(123,108,246,0.5)"; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(o.x + o.w - 8, o.y + 8, 7, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#fff"; ctx.font = "bold 7px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(o.agents_here.length, o.x + o.w - 8, o.y + 11);
   }
   ctx.restore();
 }
@@ -173,45 +328,161 @@ function drawMovePath(a) {
   ctx.restore();
 }
 
+function drawHandoffs() {
+  const now = Date.now();
+  handoffs = handoffs.filter(h => now - h.start < h.dur);
+  for (const h of handoffs) {
+    const from = localPos[h.fromId], to = localPos[h.toId];
+    if (!from || !to) continue;
+    const t = (now - h.start) / h.dur;
+    const alpha = t < 0.6 ? 0.9 : 0.9 * (1 - (t - 0.6) / 0.4);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = h.color; ctx.lineWidth = 2;
+    ctx.setLineDash([8, 4]);
+    ctx.lineDashOffset = -(now / 70) % 12;
+    ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke();
+    ctx.setLineDash([]);
+    const ang = Math.atan2(to.y - from.y, to.x - from.x);
+    const tip = {x: to.x - 18*Math.cos(ang), y: to.y - 18*Math.sin(ang)};
+    ctx.fillStyle = h.color;
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(tip.x - 9*Math.cos(ang-0.45), tip.y - 9*Math.sin(ang-0.45));
+    ctx.lineTo(tip.x - 9*Math.cos(ang+0.45), tip.y - 9*Math.sin(ang+0.45));
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
+
+const ROLE_MAP = [
+  [/\bceo\b/i,              "CEO"],
+  [/\bcto\b/i,              "CTO"],
+  [/\bcmo\b/i,              "CMO"],
+  [/\bcoo\b/i,              "COO"],
+  [/\bcfo\b/i,              "CFO"],
+  [/sales/i,                "SLS"],
+  [/financ/i,               "FIN"],
+  [/legal|counsel|lawyer/i, "LEG"],
+  [/\bpr\b|public.relat/i,  "PR"],
+  [/strateg/i,              "STR"],
+  [/product/i,              "PRD"],
+  [/research/i,             "RES"],
+  [/engineer|coder|dev/i,   "ENG"],
+  [/analys/i,               "ANL"],
+  [/writ|author/i,          "WRI"],
+  [/design/i,               "DSN"],
+  [/test|qa/i,              "QA"],
+  [/manag|lead|coord/i,     "MGR"],
+];
+function agentRole(a) {
+  const s = ((a.name||"") + " " + (a.role||"")).toLowerCase();
+  for (const [rx, lbl] of ROLE_MAP) if (rx.test(s)) return lbl;
+  return (a.name||a.id).slice(0,3).toUpperCase();
+}
+
 function drawAgent(a) {
-  const lp=localPos[a.id]; if(!lp) return;
-  const {x,y}=lp, r=16, sc=STATE_CLRS[a.state]||STATE_CLRS.idle;
+  const lp = localPos[a.id]; if (!lp) return;
+  const {x, y} = lp, r = 15;
+  const sc = STATE_CLRS[a.state] || STATE_CLRS.idle;
   ctx.save();
-  // Glow
-  const glow=ctx.createRadialGradient(x,y,0,x,y,r*2.8);
-  glow.addColorStop(0,a.color+"28"); glow.addColorStop(1,"transparent");
-  ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(x,y,r*2.8,0,Math.PI*2); ctx.fill();
+
+  // Moving ring
+  if (a.state === "moving") {
+    const pulse = 0.4 + 0.35 * Math.abs(Math.sin(animTick * 0.08));
+    ctx.strokeStyle = sc; ctx.lineWidth = 1.5; ctx.globalAlpha = pulse;
+    ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // Interaction pulse
-  if(a.state==="interacting"){
-    const p=.4+.6*Math.abs(Math.sin(animTick*.1));
-    ctx.globalAlpha=p; ctx.strokeStyle="#f59e0b"; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(x,y,r+8+4*p,0,Math.PI*2); ctx.stroke(); ctx.globalAlpha=1;
+  if (a.state === "interacting") {
+    const p = 0.3 + 0.5 * Math.abs(Math.sin(animTick * 0.09));
+    ctx.strokeStyle = sc; ctx.lineWidth = 2; ctx.globalAlpha = p;
+    ctx.beginPath(); ctx.arc(x, y, r + 6 + 3*p, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 1;
   }
-  // State ring
-  ctx.strokeStyle=sc; ctx.lineWidth=2; ctx.globalAlpha=.75;
-  ctx.beginPath(); ctx.arc(x,y,r+4,0,Math.PI*2); ctx.stroke(); ctx.globalAlpha=1;
-  // Selection
-  if(selectedId===a.id){
-    ctx.strokeStyle="#6366f1"; ctx.lineWidth=1.5; ctx.globalAlpha=.55;
-    ctx.setLineDash([4,4]); ctx.lineDashOffset=-(animTick*.4);
-    ctx.beginPath(); ctx.arc(x,y,r+9,0,Math.PI*2); ctx.stroke();
-    ctx.setLineDash([]); ctx.lineDashOffset=0; ctx.globalAlpha=1;
+
+  // Selection ring
+  if (selectedId === a.id) {
+    ctx.strokeStyle = "#5E6AD2"; ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]); ctx.lineDashOffset = -(animTick * 0.3);
+    ctx.globalAlpha = 0.65;
+    ctx.beginPath(); ctx.arc(x, y, r + 8, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]); ctx.lineDashOffset = 0; ctx.globalAlpha = 1;
   }
-  // Body
-  const grad=ctx.createRadialGradient(x-r*.3,y-r*.35,0,x,y,r);
-  grad.addColorStop(0,lighten(a.color,.45)); grad.addColorStop(1,a.color);
-  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle="rgba(255,255,255,.18)";
-  ctx.beginPath(); ctx.arc(x-r*.3,y-r*.35,r*.45,0,Math.PI*2); ctx.fill();
+
+  // Avatar background circle
+  ctx.shadowColor = a.color + "55";
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = "#1E1E26";
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+  // Colored border ring
+  ctx.strokeStyle = a.color; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
+  // Person silhouette clipped inside circle
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r - 1, 0, Math.PI*2); ctx.clip();
+  // Shoulders dome (arc centered below, filling lower half)
+  ctx.fillStyle = a.color + "99";
+  ctx.beginPath(); ctx.arc(x, y + r * 1.05, r * 0.82, 0, Math.PI, true); ctx.closePath(); ctx.fill();
+  // Head
+  ctx.shadowColor = a.color + "60"; ctx.shadowBlur = 5;
+  ctx.fillStyle = a.color;
+  ctx.beginPath(); ctx.arc(x, y - r * 0.18, r * 0.38, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+  // Head shine
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  ctx.beginPath(); ctx.arc(x - r*0.1, y - r*0.29, r * 0.14, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
   // State dot
-  ctx.fillStyle=sc; ctx.beginPath(); ctx.arc(x+r*.65,y-r*.65,4.5,0,Math.PI*2); ctx.fill();
-  // ID label
-  ctx.fillStyle="#fff"; ctx.font="bold 9px monospace";
-  ctx.textAlign="center"; ctx.textBaseline="middle";
-  ctx.fillText(a.id.slice(0,6).toUpperCase(),x,y+.5);
-  // Name
-  ctx.fillStyle="rgba(26,34,53,.7)"; ctx.font="8.5px sans-serif";
-  ctx.fillText(a.name,x,y+r+11);
+  ctx.fillStyle = sc;
+  ctx.beginPath(); ctx.arc(x + r*0.7, y - r*0.7, 4, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = "#1a1a1e"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x + r*0.7, y - r*0.7, 4, 0, Math.PI*2); ctx.stroke();
+
+  // Name below
+  ctx.fillStyle = "rgba(242,242,244,0.85)"; ctx.font = "11px 'Inter', sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillText(a.name, x, y + r + 4);
+  // Role badge
+  const role = agentRole(a);
+  ctx.font = "bold 7px 'Inter', sans-serif";
+  ctx.fillStyle = a.color + "BB";
+  ctx.textBaseline = "top";
+  ctx.fillText(role, x, y + r + 16);
+
+  // Speech bubble — dark surface with colored glow border
+  if (a.current_activity) {
+    ctx.font = "500 9.5px 'Inter', sans-serif";
+    const tw = ctx.measureText(a.current_activity).width;
+    const bw = Math.max(tw + 18, 60), bh = 20;
+    const bx = x - bw/2, by = y - r - 14 - bh;
+    // Glow + fill
+    ctx.shadowColor = a.color + "40"; ctx.shadowBlur = 10;
+    ctx.fillStyle = "#2C2C32";
+    rrect(bx, by, bw, bh, 5); ctx.fill();
+    ctx.shadowBlur = 0;
+    // Border
+    ctx.strokeStyle = a.color + "80"; ctx.lineWidth = 1.5;
+    rrect(bx, by, bw, bh, 5); ctx.stroke();
+    // Tail
+    ctx.fillStyle = "#2C2C32";
+    ctx.beginPath();
+    ctx.moveTo(x - 5, by + bh); ctx.lineTo(x + 5, by + bh); ctx.lineTo(x, by + bh + 5);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = a.color + "80"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x - 5, by + bh - 1); ctx.lineTo(x, by + bh + 5); ctx.lineTo(x + 5, by + bh - 1);
+    ctx.stroke();
+    // Text
+    ctx.fillStyle = "#F2F2F4";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(a.current_activity, x, by + bh/2);
+  }
+
   ctx.restore();
 }
 
@@ -220,7 +491,7 @@ function drawCursor() {
   const {x,y}=mouseScene;
   if(x<0||y<0||x>SCENE_W||y>SCENE_H) return;
   ctx.save();
-  ctx.globalAlpha=.4; ctx.strokeStyle="#6366f1"; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+  ctx.globalAlpha=.5; ctx.strokeStyle="#7B6CF6"; ctx.lineWidth=1; ctx.setLineDash([4,4]);
   ctx.beginPath();ctx.moveTo(x-10,y);ctx.lineTo(x+10,y);ctx.stroke();
   ctx.beginPath();ctx.moveTo(x,y-10);ctx.lineTo(x,y+10);ctx.stroke();
   ctx.setLineDash([]); ctx.restore();
@@ -292,7 +563,7 @@ function initCanvasEvents() {
 // ════════════════════════════════════════════════════════════════════
 var App = (() => {
   async function runCmd(cmd) {
-    const smart=document.getElementById("smartToggle").checked;
+    const smart=false;
     const btn=document.getElementById("cmdRunBtn");
     btn.classList.add("loading");
     try {
@@ -358,7 +629,42 @@ var App = (() => {
     UI.updateAgentList();
   }
   async function deleteObject(id) { await fetch(`/api/objects/${id}`,{method:"DELETE"}); }
-  return { runCmd, execCmd, createAgent, createObject, saveObjectTask, resetScene, exportHistory, deleteAgent, deleteObject };
+
+  function openGlobalApi() {
+    document.getElementById("gApiAgentCount").textContent = scene.agents.length;
+    // Default to OpenAI
+    setGlobalProv("openai");
+    UI.openModal("globalApiModal");
+  }
+  function setGlobalProv(p) {
+    document.querySelectorAll("#globalApiModal .prov-btn").forEach(b => b.classList.toggle("active", b.dataset.p === p));
+    document.getElementById("gApiKeyOpenaiField").classList.toggle("hidden", p !== "openai");
+    document.getElementById("gApiKeyClaudeField").classList.toggle("hidden", p !== "claude");
+  }
+  async function saveGlobalApi() {
+    const prov = document.querySelector("#globalApiModal .prov-btn.active")?.dataset.p || "openai";
+    const keyO = document.getElementById("gApiKeyOpenai").value.trim();
+    const keyC = document.getElementById("gApiKeyClaude").value.trim();
+    const key = prov === "openai" ? keyO : keyC;
+    if (!key) return;
+    const defaultModel = prov === "openai" ? "gpt-4o-mini" : "claude-haiku-4-5-20251001";
+    let saved = 0;
+    for (const a of scene.agents) {
+      const payload = { ai_config: { provider: prov, model: defaultModel } };
+      if (prov === "openai") payload.ai_config.api_key_openai = key;
+      else payload.ai_config.api_key_claude = key;
+      try {
+        await fetch(`/api/agents/${a.id}/config`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+        saved++;
+      } catch(e) {}
+    }
+    document.getElementById("gApiKeyOpenai").value = "";
+    document.getElementById("gApiKeyClaude").value = "";
+    UI.addLog("api-key", `${prov} key applied to ${saved} agents`, true);
+    UI.closeModal("globalApiModal");
+  }
+
+  return { runCmd, execCmd, createAgent, createObject, saveObjectTask, resetScene, exportHistory, deleteAgent, deleteObject, openGlobalApi, setGlobalProv, saveGlobalApi };
 })();
 
 // ════════════════════════════════════════════════════════════════════
@@ -442,6 +748,10 @@ var UI = (() => {
     const list=document.getElementById("logList");
     const now=new Date().toLocaleTimeString("en-US",{hour12:false});
     const div=document.createElement("div"); div.className="log-entry "+(ok?"ok":"err");
+    // Color by agent
+    const firstToken=(cmd||"").split(" ")[0].toLowerCase();
+    const agent=scene.agents.find(a=>a.id.toLowerCase()===firstToken);
+    if(agent) { div.style.borderLeftColor=agent.color; div.style.borderLeftWidth="3px"; }
     div.innerHTML=`<div class="log-row1"><span class="log-time">${now}</span><span class="log-mark ${ok?"ok":"err"}">${ok?"✓":"✗"}</span><span class="log-cmd" title="${esc(cmd)}">${esc(cmd)}</span></div>${result?`<div class="log-result">${esc(result)}</div>`:""}`;
     list.appendChild(div);
     if(list.children.length>120) list.firstChild.remove();
@@ -571,6 +881,8 @@ var AP = (() => {
   }
 
   // ── MCP ─────────────────────────────────────────────────────────
+  function _mcpIsReal(url) { return url && (url.startsWith("http://") || url.startsWith("https://")); }
+
   function populateMCP(a) {
     const list=document.getElementById("mcpList"); list.innerHTML="";
     const mcps=(a.mcp_servers||[]);
@@ -580,6 +892,11 @@ var AP = (() => {
 
       // Header row
       const hdr=document.createElement("div"); hdr.className="mcp-item-hdr";
+
+      const dot=document.createElement("span");
+      dot.className="mcp-status-dot "+(_mcpIsReal(m.url)?"real":"stub");
+      dot.title=_mcpIsReal(m.url)?"HTTP/SSE — tools active":"No URL — add http:// endpoint to enable tools";
+
       const nameEl=document.createElement("span"); nameEl.className="mcp-item-name"; nameEl.textContent=m.name;
       const acts=document.createElement("div"); acts.className="mcp-item-actions";
 
@@ -593,10 +910,27 @@ var AP = (() => {
       delBtn.addEventListener("click", (function(mid){ return function(){ removeMcp(mid); }; })(m.id));
 
       acts.append(togBtn, delBtn);
-      hdr.append(nameEl, acts);
+      hdr.append(dot, nameEl, acts);
       div.appendChild(hdr);
 
-      if(m.url){ const u=document.createElement("div"); u.className="mcp-item-url"; u.textContent=m.url; div.appendChild(u); }
+      // Editable URL row
+      const urlRow=document.createElement("div"); urlRow.className="mcp-url-row";
+      const urlInput=document.createElement("input");
+      urlInput.className="mcp-url-input"; urlInput.type="text";
+      urlInput.value=m.url||""; urlInput.placeholder="https://localhost:8000/sse";
+      urlInput.addEventListener("change", (function(mid, dotEl){
+        return async function(){
+          const ag=scene.agents.find(x=>x.id===currentId); if(!ag) return;
+          const newUrl=urlInput.value.trim();
+          const servers=(ag.mcp_servers||[]).map(s=>s.id===mid?{...s,url:newUrl}:s);
+          await fetch(`/api/agents/${currentId}/config`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({mcp_servers:servers})});
+          dotEl.className="mcp-status-dot "+(_mcpIsReal(newUrl)?"real":"stub");
+          dotEl.title=_mcpIsReal(newUrl)?"HTTP/SSE — tools active":"No URL — add http:// endpoint to enable tools";
+        };
+      })(m.id, dot));
+      urlRow.appendChild(urlInput);
+      div.appendChild(urlRow);
+
       if(m.description){ const d2=document.createElement("div"); d2.className="mcp-item-desc"; d2.textContent=m.description; div.appendChild(d2); }
 
       list.appendChild(div);
@@ -801,7 +1135,8 @@ function initTools() {
 // ════════════════════════════════════════════════════════════════════
 var BP = (() => {
   let selectedAgents = [];
-  let collapsed      = false;
+  let collapsed      = true;
+  let tlData         = { start: 0, end: 0, agents: [] };
   const CFG = { mcp_presets: [], agent_tools: [] };
 
   async function loadConfig() {
@@ -992,14 +1327,53 @@ var BP = (() => {
     } else if (msg.type === "task_tool") {
       addToolCall(msg.agent_id, msg.tool, msg.input);
     } else if (msg.type === "task_start") {
+      tlData = { start: Date.now(), end: 0, agents: [] };
       expand();
       addMsg("system", "▶ Task started — agents: " + msg.agents.join(", "), null, msg.ts);
-    } else if (msg.type === "task_done") {
-      addMsg("system", "✓ Task complete.", null, msg.ts);
-      document.getElementById("bpSend")?.classList.remove("loading");
+      renderTimeline();
     } else if (msg.type === "task_agent_start") {
       const a = scene.agents.find(x => x.id === msg.agent_id);
-      if(a) addMsg("system", `${a.name} is working…`, null, msg.ts);
+      // End previous agent timeline bar
+      if (tlData.agents.length) {
+        const prev = tlData.agents[tlData.agents.length - 1];
+        if (!prev.end) prev.end = Date.now();
+      }
+      if (a) tlData.agents.push({id: msg.agent_id, name: a.name, color: a.color, start: Date.now(), end: 0});
+      if (a) addMsg("system", `${a.name} is working…`, null, msg.ts);
+      renderTimeline();
+    } else if (msg.type === "task_agent_done") {
+      const tl = tlData.agents.find(x => x.id === msg.agent_id);
+      if (tl && !tl.end) tl.end = Date.now();
+      renderTimeline();
+    } else if (msg.type === "task_handoff") {
+      const fromA = scene.agents.find(x => x.id === msg.from_id);
+      const toA   = scene.agents.find(x => x.id === msg.to_id);
+      if (fromA && toA) {
+        handoffs.push({fromId: msg.from_id, toId: msg.to_id,
+                       start: Date.now(), dur: 3000, color: fromA.color});
+        addMsg("system", `${fromA.name} → ${toA.name} (passing context)`, null, msg.ts);
+      }
+    } else if (msg.type === "agent_message") {
+      expand();
+      const msgs = document.getElementById("bpMsgs"); if (!msgs) return;
+      const fromA = scene.agents.find(x => x.id === msg.from_id);
+      const toA   = scene.agents.find(x => x.id === msg.to_id);
+      const div = document.createElement("div"); div.className = "bp-agent-relay";
+      div.innerHTML =
+        `<span style="color:${fromA?.color||'#888'};font-weight:600">${fromA?.name||msg.from_id}</span>` +
+        `<span class="relay-arrow">→</span>` +
+        `<span style="color:${toA?.color||'#888'};font-weight:600">${toA?.name||msg.to_id}</span>` +
+        `<span class="relay-msg">${UI.esc((msg.content||'').slice(0,120))}</span>`;
+      msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+      // Also trigger handoff arrow
+      if (fromA && toA)
+        handoffs.push({fromId: msg.from_id, toId: msg.to_id, start: Date.now(), dur: 2500, color: fromA.color});
+    } else if (msg.type === "task_done") {
+      tlData.end = Date.now();
+      tlData.agents.forEach(a => { if (!a.end) a.end = Date.now(); });
+      addMsg("system", "✓ Task complete.", null, msg.ts);
+      document.getElementById("bpSend")?.classList.remove("loading");
+      renderTimeline();
     }
   }
 
@@ -1128,7 +1502,28 @@ var BP = (() => {
     });
   }
 
+  function renderTimeline() {
+    const el = document.getElementById("bpTimeline"); if (!el) return;
+    if (!tlData.agents.length) { el.classList.add("hidden"); return; }
+    el.classList.remove("hidden");
+    const now = tlData.end || Date.now();
+    const total = Math.max(now - tlData.start, 1);
+    el.innerHTML = "";
+    for (const ag of tlData.agents) {
+      const end = ag.end || now;
+      const leftPct  = ((ag.start - tlData.start) / total * 100).toFixed(1);
+      const widthPct = Math.max(((end - ag.start) / total * 100), 2).toFixed(1);
+      const row = document.createElement("div"); row.className = "tl-row";
+      row.innerHTML =
+        `<span class="tl-name" style="color:${ag.color}" title="${ag.name}">${ag.name}</span>` +
+        `<div class="tl-bar-wrap"><div class="tl-bar" style="left:${leftPct}%;width:${widthPct}%;background:${ag.color}"></div></div>` +
+        `<span class="tl-dur">${((end - ag.start)/1000).toFixed(1)}s</span>`;
+      el.appendChild(row);
+    }
+  }
+
   function init() {
+    document.getElementById("bottomPanel").classList.add("collapsed");
     document.getElementById("bpToggle").addEventListener("click", toggleCollapse);
     document.getElementById("bpSend").addEventListener("click", send);
     initResize();
@@ -1169,7 +1564,7 @@ var BP = (() => {
     ta.addEventListener("blur", () => setTimeout(removeAutocomplete, 150));
   }
 
-  return { init, loadConfig, renderChips, onWsEvent,
+  return { init, loadConfig, renderChips, onWsEvent, renderTimeline,
            renderMcpPresets, renderTools, getEnabledTools,
            toggleAgent, removeAgent };
 })();

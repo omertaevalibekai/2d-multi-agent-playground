@@ -55,7 +55,9 @@ class Environment:
     # ------------------------------------------------------------------
     def _reset_defaults(self):
         for d in DEFAULT_AGENTS:
-            self._add_agent_raw(d["id"], d["name"], d["x"], d["y"], d["color"])
+            a = self._add_agent_raw(d["id"], d["name"], d["x"], d["y"], d["color"])
+            if d.get("system_prompt"):
+                a.ai_config["system_prompt"] = d["system_prompt"]
         for d in DEFAULT_OBJECTS:
             self._add_object_raw(
                 d["id"], d["type"], d["x"], d["y"], d["w"], d["h"],

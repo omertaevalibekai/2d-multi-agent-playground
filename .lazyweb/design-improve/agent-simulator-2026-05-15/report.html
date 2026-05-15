@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Design Improvement: Agent Simulator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.65;
+    background: #f8f9fa; color: #1a1a1e;
+    padding: 40px 20px;
+  }
+  .page { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 700; margin-bottom: 4px; }
+  .meta { font-size: 13px; color: #666; margin-bottom: 32px; }
+  h2 { font-size: 19px; font-weight: 700; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e5e5; }
+  h3 { font-size: 16px; font-weight: 700; margin: 28px 0 10px; color: #1a1a1e; }
+  p { margin-bottom: 12px; }
+  ul { margin: 0 0 14px 20px; }
+  li { margin-bottom: 5px; }
+  code {
+    background: #f0f0f5; border-radius: 4px;
+    padding: 1px 6px; font-size: 13px;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    color: #7b6cf6;
+  }
+  pre {
+    background: #1a1a1e; color: #f2f2f4;
+    border-radius: 8px; padding: 16px; overflow-x: auto;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    font-size: 12px; line-height: 1.6; margin: 12px 0 20px;
+  }
+  .tldr {
+    background: #eef4ff; border-left: 4px solid #7b6cf6;
+    border-radius: 0 8px 8px 0; padding: 16px 20px;
+    margin-bottom: 32px; font-size: 15px; line-height: 1.7;
+  }
+  .tldr strong { color: #7b6cf6; }
+  .idea {
+    background: #fff; border: 1px solid #e5e5e5;
+    border-radius: 12px; padding: 24px 28px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
+  .idea-title {
+    font-size: 17px; font-weight: 700; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .star { color: #f59e0b; font-size: 18px; }
+  .inspired-label {
+    font-size: 11px; font-weight: 600; color: #888;
+    text-transform: uppercase; letter-spacing: .05em;
+    margin: 18px 0 8px;
+  }
+  .ref-img {
+    max-width: 100%; border-radius: 8px;
+    box-shadow: 0 3px 12px rgba(0,0,0,.15);
+    display: block; margin-bottom: 6px;
+  }
+  .ref-caption {
+    font-size: 12px; color: #666; margin-bottom: 16px;
+    font-style: italic;
+  }
+  .working-list {
+    background: #f0fff4; border: 1px solid #bbf7d0;
+    border-radius: 10px; padding: 18px 22px;
+  }
+  .working-list li { margin-bottom: 8px; }
+  .working-list strong { color: #16a34a; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th { background: #f0f0f5; font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 9px 12px; text-align: left; color: #555; }
+  td { padding: 9px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  .tag {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    padding: 2px 7px; border-radius: 99px;
+    background: rgba(123,108,246,.1); color: #7b6cf6;
+    letter-spacing: .03em; margin-left: 4px;
+  }
+  .divider { height: 1px; background: #e5e5e5; margin: 40px 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>Design Improvement: Agent Simulator</h1>
+  <div class="meta">Date: 2026-05-15 &nbsp;·&nbsp; Screen: Main workspace</div>
+
+  <div class="tldr">
+    <strong>TL;DR:</strong> The biggest opportunity is <strong>space reclamation</strong>: the bottom Task Chat panel defaults to 280px and the canvas is the primary stage. Collapsing it by default, plus surfacing Smart Mode as a visible input mode rather than a hidden toggle, would immediately make the app feel more powerful and intentional.
+  </div>
+
+  <h2>Current State</h2>
+  <p><em>No live screenshot captured (browse tool unavailable). Mockup reconstructed from full HTML/CSS source.</em></p>
+  <pre>
+┌─────────────────────────────────────────────────────────────────────┐
+│ ◇ Agent Simulator  ● Connected   [Export] [Reset]    [+ Agent]      │  ← 44px header
+├──────────────┬──────────────────────────────────┬────────────────────┤
+│ AGENTS       │  [▶ select][✥ drag]  [⏺][▶][──]  │  Command           │
+│  ● Alpha     │                                  │  $ agent1 move…  ↵ │
+│  ● Beta      │         Canvas 800×600           │  [All→C][Stop][Stat]│
+│  ● Gamma     │         (agents moving)           │  [Hist ][Help][Reset│
+│ OBJECTS      │                                  │  LOG               │
+│  🖥 Table 1  │                                  │  12:01 ✓ agent1 move│
+│  💻 PC 1    │                                  │  12:02 ✓ all stop  │
+├──────────────┴──────────────────────────────────┴────────────────────┤
+│ ▼  TASK CHAT    [● Alpha] [● Beta] [● Gamma]              [▼ toggle] │  ← 280px tall!
+│  Click agent chips above or type /agent1 to assign.                  │
+│  [ Type a task… /agent1 research AI trends                       →]  │
+└─────────────────────────────────────────────────────────────────────┘</pre>
+
+  <h2>Improvement Ideas</h2>
+
+  <!-- IDEA 1 -->
+  <div class="idea">
+    <div class="idea-title"><span class="star">⭐</span> 1. Collapse Bottom Panel by Default</div>
+    <p>Set <code>height: 42px</code> as the default state for <code>.bottom-panel</code> on load. Show the Task Chat title + agent chips, but start body hidden. Users expand on demand.</p>
+    <p>The current 280px default buries the canvas — the actual simulation stage — before any agent interaction happens. This is the single change with the highest visual impact for zero effort.</p>
+
+    <div class="inspired-label">Inspired by</div>
+    <img src="references/vibe-kanban-workspace.png" class="ref-img" alt="Vibe-kanban workspace"/>
+    <div class="ref-caption">Vibe-kanban — Four-panel workspace with collapsible bottom panel; chat stays accessible without dominating the layout [Lazyweb]</div>
+
+    <pre>
+After — collapsed by default (42px):
+┌─────────────────────────────────────────────────────────────┐
+│  TASK CHAT    [● Alpha] [● Beta] [● Gamma]              [▲] │
+└─────────────────────────────────────────────────────────────┘
+
+On click — expands smoothly:
+┌─────────────────────────────────────────────────────────────┐
+│  TASK CHAT    [● Alpha] [● Beta] [● Gamma]              [▼] │
+│  ┌───────────────────────────────────────────────────────┐   │
+│  │  messages…                                            │   │
+│  └───────────────────────────────────────────────────────┘   │
+│  [ Type a task… /agent1 research AI trends             →  ]  │
+└─────────────────────────────────────────────────────────────┘</pre>
+
+    <p><strong>Implementation:</strong> In <code>script.js</code>, add <code>bottomPanel.classList.add('collapsed')</code> during app init (before WebSocket connects).</p>
+  </div>
+
+  <!-- IDEA 2 -->
+  <div class="idea">
+    <div class="idea-title">2. Make Smart Mode a First-Class Input Mode</div>
+    <p>Replace the tiny <code>&lt;label class="smart-toggle"&gt;</code> in the panel header with a visible mode pill that lives inside the command input bar. Two states: <code>[$ CMD]</code> vs <code>[✦ SMART]</code>. When Smart is active, tint the prompt accent color and change placeholder text to <em>"Ask in natural language…"</em></p>
+    <p>Smart Mode is the AI superpower of the app, but it's a hidden toggle most users will never notice. Making it visible signals that AI is a first-class citizen.</p>
+
+    <div class="inspired-label">Inspired by</div>
+    <img src="references/microsoft-copilot-mode-selector.png" class="ref-img" alt="Microsoft Copilot mode selector"/>
+    <div class="ref-caption">Microsoft Copilot — Central AI input with an explicit mode selector and quick-action suggestion chips [Lazyweb]</div>
+
+    <pre>
+Before:
+┌─────────────────────────────────────┐
+│ Command                    [Smart ○]│  ← buried toggle
+│ $ agent1 move 400 300            ↵  │
+└─────────────────────────────────────┘
+
+After:
+┌─────────────────────────────────────┐
+│  [$ CMD]  [✦ SMART]                 │  ← tab switcher above input
+├─────────────────────────────────────┤
+│  $ agent1 move 400 300           ↵  │  CMD mode
+│                                     │
+│  ✦ send everyone to the center   ↵  │  SMART mode (violet tint)
+└─────────────────────────────────────┘</pre>
+
+    <p><strong>Implementation:</strong> Convert toggle to a tab strip above <code>.cmd-input-wrap</code>. Add <code>.smart-active</code> class on <code>.cmd-panel</code> that updates <code>--cmd-prompt-color</code> and placeholder text.</p>
+  </div>
+
+  <!-- IDEA 3 -->
+  <div class="idea">
+    <div class="idea-title">3. Visual Hierarchy in Quick-Command Grid</div>
+    <p>The 6 quick-grid buttons are visually identical. Split them into tiers:</p>
+    <ul>
+      <li><strong>Primary actions</strong> (mutate agent state): <code>All→Center</code>, <code>Stop All</code> → accent-tinted background + border</li>
+      <li><strong>Utility/info</strong>: <code>Status</code>, <code>History</code>, <code>Help</code> → current muted style (fine)</li>
+      <li><strong>Destructive</strong>: <code>Reset</code> → subtle red tint on hover (<code>var(--err-bg)</code> + <code>var(--err)</code> text)</li>
+    </ul>
+
+    <div class="inspired-label">Inspired by</div>
+    <img src="references/intercom-agent-workspace.png" class="ref-img" alt="Intercom agent workspace"/>
+    <div class="ref-caption">Intercom — Agent workspace with tiered action hierarchy; primary actions stand apart from secondary status/config [Lazyweb]</div>
+
+    <pre>
+Before (all identical gray):
+┌────────┬────────┬────────┐
+│All→Ctr │Stop All│ Status │
+│ History│  Help  │ Reset  │
+└────────┴────────┴────────┘
+
+After (tiered):
+┌─────────────┬─────────────┬────────┐
+│ All→Center  │  Stop All   │ Status │  ← violet border (primary)
+│   History   │    Help     │ Reset  │  ← muted / Reset: red on hover
+└─────────────┴─────────────┴────────┘</pre>
+
+    <p><strong>Implementation:</strong> Add <code>q-btn--primary</code> and <code>q-btn--danger</code> to <code>styles.css</code>, apply to the relevant 2 buttons in <code>index.html</code>.</p>
+  </div>
+
+  <!-- IDEA 4 -->
+  <div class="idea">
+    <div class="idea-title">4. In-App Keyboard Shortcut Strip</div>
+    <p>Add a single-line hint strip below the command input, visible on focus. Shows: <code>Tab → autocomplete · ↑↓ → history · / → focus · Ctrl+L → clear log</code></p>
+    <p>The app has excellent keyboard support but it's completely undiscoverable in-app. It only appears in the README. Power features users don't know about are wasted.</p>
+
+    <div class="inspired-label">Inspired by</div>
+    <img src="references/8thwall-canvas-editor.png" class="ref-img" alt="8th Wall canvas editor"/>
+    <div class="ref-caption">8th Wall — WebXR 3D editor with inline keyboard shortcut hints, helping developers discover navigation controls without leaving the tool [Lazyweb]</div>
+
+    <pre>
+┌──────────────────────────────────────────────┐
+│ $ agent1 move 400 300                     ↵  │
+└──────────────────────────────────────────────┘
+  Tab autocomplete · ↑↓ history · / focus · Ctrl+L clear
+  (10px muted monospace, fades in on :focus-within)</pre>
+
+    <p><strong>Implementation:</strong></p>
+    <pre>
+/* styles.css */
+.cmd-hints {
+  font-size: 10px; color: var(--text-3);
+  padding: 0 12px 8px; font-family: var(--mono);
+  opacity: 0; transition: opacity .2s;
+}
+.cmd-panel:focus-within .cmd-hints { opacity: 1; }</pre>
+    <p>Add one line to <code>index.html</code> inside <code>.cmd-panel</code>: <code>&lt;div class="cmd-hints"&gt;Tab → autocomplete · ↑↓ history · / focus · Ctrl+L clear&lt;/div&gt;</code></p>
+  </div>
+
+  <div class="divider"></div>
+
+  <h2>What's Working</h2>
+  <div class="working-list">
+    <ul>
+      <li><strong>Design system is excellent</strong> — The token system (<code>--bg</code>, <code>--surface</code>, <code>--accent</code>, etc.) is consistent and professional. The Raycast-inspired charcoal theme is polished.</li>
+      <li><strong>Chain-of-thought display</strong> — The <code>bp-cot-thought</code> left-border + <code>bp-cot-observation</code> green indicators are a standout UX detail for agent reasoning. Don't change this.</li>
+      <li><strong>Agent card delete pattern</strong> — Delete button appears only on hover, red-tinted. Correct interaction model for destructive actions.</li>
+      <li><strong>Canvas toolbar separation</strong> — Grouping select/drag tools separately from record/playback in the same bar is clean and logical.</li>
+      <li><strong>MCP preset pill "added" state</strong> — Green border + no pointer-events gives instant confirmation without a modal. Excellent micro-interaction.</li>
+    </ul>
+  </div>
+
+  <h2>All References</h2>
+  <table>
+    <tr><th>Screenshot</th><th>Source</th><th>Relevance</th></tr>
+    <tr><td>vibe-kanban-workspace.png</td><td>Vibe-kanban <span class="tag">Lazyweb</span></td><td>4-panel collapsible workspace pattern</td></tr>
+    <tr><td>microsoft-copilot-mode-selector.png</td><td>Microsoft Copilot <span class="tag">Lazyweb</span></td><td>AI mode selector in input bar</td></tr>
+    <tr><td>intercom-agent-workspace.png</td><td>Intercom <span class="tag">Lazyweb</span></td><td>Tiered agent action hierarchy</td></tr>
+    <tr><td>8thwall-canvas-editor.png</td><td>8th Wall <span class="tag">Lazyweb</span></td><td>In-editor keyboard shortcut visibility</td></tr>
+  </table>
+
+</div>
+</body>
+</html>

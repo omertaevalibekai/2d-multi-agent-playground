@@ -59,6 +59,22 @@ def _build_llm(provider: str, model: str, temperature: float,
         return ChatAnthropic(api_key=key_claude, model_name=model, temperature=temperature)
 
 
+def _is_real_url(url: str) -> bool:
+    return bool(url) and (url.startswith("http://") or url.startswith("https://"))
+
+
+def _mcp_server_configs(servers: list) -> dict:
+    configs = {}
+    for s in servers:
+        url = s.get("url", "")
+        if not _is_real_url(url):
+            continue
+        transport = "sse" if ("/sse" in url or url.endswith("/sse")) else "streamable_http"
+        key = re.sub(r"[^a-zA-Z0-9_]", "_", s.get("id", s.get("name", "server")))
+        configs[key] = {"url": url, "transport": transport}
+    return configs
+
+
 def _build_tools(enabled: list, mcp_active: list, inter_agent_messages: dict) -> list:
     tools = []
     for tid in enabled:
@@ -131,6 +147,25 @@ def _build_system(agent_dict: dict, prior_context: str, mcp_active: list) -> str
     return base
 
 
+def _tool_activity(tool_name: str) -> str:
+    tl = tool_name.lower()
+    if any(k in tl for k in ("search", "tavily", "ddg", "bing")): return "🔍 searching…"
+    if any(k in tl for k in ("read_url", "fetch", "browse", "http")): return "🌐 reading page…"
+    if "message" in tl: return "📨 messaging agent…"
+    if "read" in tl and "file" in tl: return "📄 reading file…"
+    if "write" in tl and "file" in tl: return "💾 writing file…"
+    if any(k in tl for k in ("exec", "python", "bash", "terminal", "shell")): return "⚙️ running code…"
+    return f"⚡ {tool_name[:18]}…"
+
+
+def _make_set_activity(aid: str, env_agents: dict) -> Callable:
+    async def set_activity(text: str) -> None:
+        agent = env_agents.get(aid)
+        if agent:
+            agent.current_activity = text
+    return set_activity
+
+
 # ─── Single-agent task runner ────────────────────────────────────────────────
 async def run_agent_task(
     agent_dict: dict,
@@ -139,6 +174,7 @@ async def run_agent_task(
     broadcast: Callable,
     inter_agent_messages: Dict[str, List[str]],
     move_to_location: Optional[Callable] = None,
+    set_activity: Optional[Callable] = None,
 ) -> str:
     from langgraph.prebuilt import create_react_agent
     from langchain_core.runnables import RunnableConfig
@@ -152,13 +188,20 @@ async def run_agent_task(
     key_claude = cfg.get("api_key_claude", "") or os.getenv("ANTHROPIC_API_KEY", "")
     key_openai = cfg.get("api_key_openai", "") or os.getenv("OPENAI_API_KEY", "")
 
-    if provider == "openai" and not key_openai:
-        msg = f"No OpenAI API key for {agent_dict['name']}. Add it in the AI tab."
-        await broadcast({"type": "task_msg", "agent_id": aid,
-                         "role": "error", "content": msg, "ts": time.time()})
-        return msg
-    if provider != "openai" and not key_claude:
-        msg = f"No Anthropic API key for {agent_dict['name']}. Add it in the AI tab."
+    # Fall back to whichever provider has a key if the configured one doesn't
+    if provider == "openai" and not key_openai and key_claude:
+        provider = "claude"
+    elif provider != "openai" and not key_claude and key_openai:
+        provider = "openai"
+
+    # Ensure model is compatible with the final provider
+    if provider == "openai" and model.startswith("claude"):
+        model = "gpt-4o-mini"
+    elif provider != "openai" and (model.startswith("gpt") or model.startswith("o1") or model.startswith("o3")):
+        model = "claude-haiku-4-5-20251001"
+
+    if not key_claude and not key_openai:
+        msg = f"No API key for {agent_dict['name']}. Use the API button in the header."
         await broadcast({"type": "task_msg", "agent_id": aid,
                          "role": "error", "content": msg, "ts": time.time()})
         return msg
@@ -176,83 +219,98 @@ async def run_agent_task(
     tools      = _build_tools(enabled, mcp_active, inter_agent_messages)
     system     = _build_system(agent_dict, prior_context, mcp_active)
 
-    # Build LangGraph ReAct agent (LangGraph 1.x uses `prompt` param)
-    agent = create_react_agent(llm, tools, prompt=system)
-
-    # Inject messages from other agents
+    # Inject messages from other agents (do this once before streaming)
     received  = inter_agent_messages.pop(aid, [])
     full_task = task
     if received:
         full_task += "\n\n[Messages from collaborating agents]:\n" + "\n".join(received)
 
-    messages   = [HumanMessage(content=full_task)]
-    final_text = ""
-    config     = RunnableConfig(recursion_limit=30)
-
-    try:
-        async for chunk in agent.astream(
-            {"messages": messages},
-            config=config,
-            stream_mode="updates",
-        ):
-            for node_name, node_output in chunk.items():
-                for msg in node_output.get("messages", []):
-
-                    if isinstance(msg, AIMessage):
-                        content = _ai_msg_text(msg)
-
-                        if msg.tool_calls:
-                            # Agent is reasoning + about to call tools
-                            if content:
+    async def _stream(all_tools: list) -> str:
+        react_agent = create_react_agent(llm, all_tools, prompt=system)
+        messages    = [HumanMessage(content=full_task)]
+        final_text  = ""
+        config      = RunnableConfig(recursion_limit=30)
+        try:
+            async for chunk in react_agent.astream(
+                {"messages": messages},
+                config=config,
+                stream_mode="updates",
+            ):
+                for node_name, node_output in chunk.items():
+                    for msg in node_output.get("messages", []):
+                        if isinstance(msg, AIMessage):
+                            content = _ai_msg_text(msg)
+                            if msg.tool_calls:
+                                if content:
+                                    await broadcast({
+                                        "type":     "task_thought",
+                                        "agent_id": aid,
+                                        "content":  content,
+                                        "ts":       time.time(),
+                                    })
+                                for tc in msg.tool_calls:
+                                    if move_to_location:
+                                        loc = _tool_location(tc["name"])
+                                        if loc:
+                                            await move_to_location(loc)
+                                    if set_activity:
+                                        await set_activity(_tool_activity(tc["name"]))
+                                    await broadcast({
+                                        "type":     "task_tool",
+                                        "agent_id": aid,
+                                        "tool":     tc["name"],
+                                        "input":    tc["args"],
+                                        "ts":       time.time(),
+                                    })
+                            elif content:
+                                if move_to_location:
+                                    await move_to_location("table2")
+                                if set_activity:
+                                    await set_activity("✍ writing…")
+                                final_text = content
                                 await broadcast({
-                                    "type":     "task_thought",
+                                    "type":     "task_msg",
                                     "agent_id": aid,
+                                    "role":     "assistant",
                                     "content":  content,
                                     "ts":       time.time(),
                                 })
-                            for tc in msg.tool_calls:
-                                # Move to the workspace location matching the tool
-                                if move_to_location:
-                                    loc = _tool_location(tc["name"])
-                                    if loc:
-                                        await move_to_location(loc)
-                                await broadcast({
-                                    "type":     "task_tool",
-                                    "agent_id": aid,
-                                    "tool":     tc["name"],
-                                    "input":    tc["args"],
-                                    "ts":       time.time(),
-                                })
-                        elif content:
-                            # Final answer — agent writes response → Table 2
-                            if move_to_location:
-                                await move_to_location("table2")
-                            final_text = content
+                        elif isinstance(msg, ToolMessage):
+                            obs = msg.content if isinstance(msg.content, str) else str(msg.content)
                             await broadcast({
-                                "type":     "task_msg",
+                                "type":     "task_observation",
                                 "agent_id": aid,
-                                "role":     "assistant",
-                                "content":  content,
+                                "tool":     getattr(msg, "name", ""),
+                                "content":  obs[:600],
                                 "ts":       time.time(),
                             })
+        except Exception as e:
+            err = f"Agent error: {e}"
+            await broadcast({"type": "task_msg", "agent_id": aid,
+                             "role": "error", "content": err, "ts": time.time()})
+            return err
+        return final_text
 
-                    elif isinstance(msg, ToolMessage):
-                        obs = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        await broadcast({
-                            "type":     "task_observation",
-                            "agent_id": aid,
-                            "tool":     getattr(msg, "name", ""),
-                            "content":  obs[:600],
-                            "ts":       time.time(),
-                        })
+    # Wrap with real MCP servers if any have HTTP/SSE URLs
+    real_mcp = [s for s in mcp_active if _is_real_url(s.get("url", ""))]
+    if real_mcp:
+        try:
+            from langchain_mcp_adapters.client import MultiServerMCPClient
+            mcp_configs = _mcp_server_configs(real_mcp)
+            names = ", ".join(s["name"] for s in real_mcp)
+            await broadcast({"type": "task_msg", "agent_id": aid, "role": "system",
+                             "content": f"🔌 Connecting to MCP servers: {names}…", "ts": time.time()})
+            async with MultiServerMCPClient(mcp_configs) as mcp_client:
+                mcp_tools = mcp_client.get_tools()
+                await broadcast({"type": "task_msg", "agent_id": aid, "role": "system",
+                                 "content": f"✅ MCP ready — {len(mcp_tools)} tool(s) loaded", "ts": time.time()})
+                return await _stream(tools + mcp_tools)
+        except Exception as e:
+            await broadcast({"type": "task_msg", "agent_id": aid, "role": "error",
+                             "content": f"⚠ MCP connection failed: {e}. Continuing without MCP tools.",
+                             "ts": time.time()})
 
-    except Exception as e:
-        err = f"Agent error: {e}"
-        await broadcast({"type": "task_msg", "agent_id": aid,
-                         "role": "error", "content": err, "ts": time.time()})
-        return err
-
-    return final_text
+    return await _stream(tools)
 
 
 # ─── Multi-agent task runner ─────────────────────────────────────────────────
@@ -289,35 +347,54 @@ async def run_task(
     move_agent: Callable,
 ) -> None:
     inter_agent_messages: Dict[str, List[str]] = {}
-
-    # Save home positions before any movement
     home = {aid: (env_agents[aid].x, env_agents[aid].y)
             for aid in agent_ids if aid in env_agents}
 
-    await broadcast({"type": "task_start", "agents": agent_ids,
-                     "task": task, "ts": time.time()})
+    await broadcast({"type": "task_start", "agents": agent_ids, "task": task, "ts": time.time()})
 
-    # Sequential pipeline: each agent gets prior context, returns home when done
     prior_context = ""
+    prev_aid = None
+
     for aid in agent_ids:
         agent = env_agents.get(aid)
         if not agent:
             continue
+
+        # Broadcast handoff arrow from previous agent
+        if prev_aid:
+            await broadcast({"type": "task_handoff", "from_id": prev_aid, "to_id": aid, "ts": time.time()})
 
         agent_dict = agent.to_dict()
         agent_dict["ai_config"]["api_key_claude"] = agent.ai_config.get("api_key_claude", "")
         agent_dict["ai_config"]["api_key_openai"] = agent.ai_config.get("api_key_openai", "")
         agent_dict["mcp_servers"] = agent.mcp_servers
 
-        move_to_loc = _make_move_to_location(aid, env_objects_snapshot, move_agent, env_agents)
+        move_to_loc  = _make_move_to_location(aid, env_objects_snapshot, move_agent, env_agents)
+        set_activity = _make_set_activity(aid, env_agents)
+
+        msgs_before = {k: len(v) for k, v in inter_agent_messages.items()}
         await broadcast({"type": "task_agent_start", "agent_id": aid, "ts": time.time()})
+
+        # Pre-move agent immediately so they start walking before the LLM responds
+        initial_loc = infer_location(task) or "table2"
+        await move_to_loc(initial_loc)
 
         result = await run_agent_task(
             agent_dict, task, prior_context, broadcast, inter_agent_messages,
-            move_to_location=move_to_loc,
+            move_to_location=move_to_loc, set_activity=set_activity,
         )
 
-        # Agent finished — reset state and walk home immediately
+        await broadcast({"type": "task_agent_done", "agent_id": aid, "ts": time.time()})
+
+        # Broadcast any inter-agent messages sent during this run
+        for target_id, msgs in inter_agent_messages.items():
+            old_len = msgs_before.get(target_id, 0)
+            for msg_text in msgs[old_len:]:
+                await broadcast({"type": "agent_message", "from_id": aid,
+                                  "to_id": target_id, "content": msg_text[:300], "ts": time.time()})
+
+        # Reset agent and go home
+        agent.current_activity = ""
         agent.state = "idle"
         agent.target_x = None
         agent.target_y = None
@@ -325,9 +402,9 @@ async def run_task(
         if aid in home:
             await move_agent(aid, home[aid][0], home[aid][1], None)
 
-        # Pass result as context to the next agent
         if result:
             prior_context += f"\n\n[{agent_dict['name']} completed]:\n{result}"
+        prev_aid = aid
 
     await broadcast({"type": "task_done", "ts": time.time()})
 
@@ -467,6 +544,8 @@ async def auto_plan_task(
 
     # Sequential pipeline: each agent works, then returns home and passes context to next
     prior_context = ""
+    prev_aid = None
+
     for assignment in plan:
         aid     = assignment.get("agent_id", "")
         subtask = assignment.get("subtask", task)
@@ -474,20 +553,41 @@ async def auto_plan_task(
         if not agent:
             continue
 
+        # Broadcast handoff arrow from previous agent
+        if prev_aid:
+            await broadcast({"type": "task_handoff", "from_id": prev_aid, "to_id": aid, "ts": time.time()})
+
         agent_dict = agent.to_dict()
         agent_dict["ai_config"]["api_key_claude"] = agent.ai_config.get("api_key_claude", "")
         agent_dict["ai_config"]["api_key_openai"] = agent.ai_config.get("api_key_openai", "")
         agent_dict["mcp_servers"] = agent.mcp_servers
 
-        move_to_loc = _make_move_to_location(aid, env_objects_snapshot, move_agent, env_agents)
+        move_to_loc  = _make_move_to_location(aid, env_objects_snapshot, move_agent, env_agents)
+        set_activity = _make_set_activity(aid, env_agents)
+
+        msgs_before = {k: len(v) for k, v in inter_agent_messages.items()}
         await broadcast({"type": "task_agent_start", "agent_id": aid, "ts": time.time()})
+
+        # Pre-move agent immediately so they start walking before the LLM responds
+        initial_loc = infer_location(subtask) or "table2"
+        await move_to_loc(initial_loc)
 
         result = await run_agent_task(
             agent_dict, subtask, prior_context, broadcast, inter_agent_messages,
-            move_to_location=move_to_loc,
+            move_to_location=move_to_loc, set_activity=set_activity,
         )
 
-        # Agent finished — reset state and walk home immediately
+        await broadcast({"type": "task_agent_done", "agent_id": aid, "ts": time.time()})
+
+        # Broadcast any inter-agent messages sent during this run
+        for target_id, msgs in inter_agent_messages.items():
+            old_len = msgs_before.get(target_id, 0)
+            for msg_text in msgs[old_len:]:
+                await broadcast({"type": "agent_message", "from_id": aid,
+                                  "to_id": target_id, "content": msg_text[:300], "ts": time.time()})
+
+        # Reset agent and go home
+        agent.current_activity = ""
         agent.state = "idle"
         agent.target_x = None
         agent.target_y = None
@@ -495,8 +595,8 @@ async def auto_plan_task(
         if aid in home:
             await move_agent(aid, home[aid][0], home[aid][1], None)
 
-        # Pass result as context to the next agent
         if result:
             prior_context += f"\n\n[{agent.name} completed]:\n{result}"
+        prev_aid = aid
 
     await broadcast({"type": "task_done", "ts": time.time()})
